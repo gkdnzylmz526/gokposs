@@ -1170,9 +1170,9 @@ async def table_add_item(table_id: str, body: TableItemIn, request: Request):
     await kitchen_add(table, product, body.quantity)
     return {**order, "items": items, "total": total}
 
-def _sale_doc(item: Dict[str, Any], quantity: float, amount: float, payment: str, table: Dict[str, Any]) -> Dict[str, Any]:
+def _sale_doc(item: Dict[str, Any], quantity: float, amount: float, payment: str, table: Dict[str, Any], split: bool = False) -> Dict[str, Any]:
     return SalesEntry(product_id=item["product_id"], product_name=item["product_name"], quantity=round(quantity, 4), unit_price=item["unit_price"], channel="Salon",
-                      payment=payment, amount=round(amount, 2), note=f"Masa {table['name']}").model_dump()
+                      payment=payment, amount=round(amount, 2), note=f"Masa {table['name']}{' · bölünmüş hesap' if split else ''}").model_dump()
 
 async def _save_tip(amount: float, table: Dict[str, Any], payment: str) -> str:
     if amount <= 0:
@@ -1217,7 +1217,7 @@ async def _pay(order: Dict[str, Any], table: Dict[str, Any], body: TablePayIn, r
         for row in items:
             for p in pending:
                 share = p["amount"] / total
-                await insert_sale(_sale_doc(row, row["quantity"] * share, row["quantity"] * row["unit_price"] * share, p["payment"], table), request)
+                await insert_sale(_sale_doc(row, row["quantity"] * share, row["quantity"] * row["unit_price"] * share, p["payment"], table, len(pending) > 1), request)
         paid.extend(pending)
         items, pending = [], []
     closed = not items
@@ -1338,11 +1338,16 @@ async def create_stock_transfer(body: TransferIn, request: Request):
     doc = {"id": str(uuid.uuid4()), "from_restaurant": src, "to_restaurant": body.to_restaurant, "from_name": RESTAURANT_NAMES[src], "to_name": RESTAURANT_NAMES[body.to_restaurant],
            "note": body.note, "items": [], "created_by": getattr(request.state, "member", {}).get("email", ""), "created_at": datetime.now(timezone.utc).isoformat()}
     ref = {"id": doc["id"], "product_name": ""}
+    token = current_rid.set(body.to_restaurant)
+    try:
+        existing = {i["id"] for i in await list_items("inventory", limit=None)}
+    finally:
+        current_rid.reset(token)
     for inv_id, q in wanted.items():
         item = sources[inv_id]
         await apply_moves([{"inventory_id": inv_id, "delta": -q}], 1, ref, f"Transfer → {doc['to_name']}")
         target = await _move_in(body.to_restaurant, item, q, ref, f"Transfer ← {doc['from_name']}")
-        doc["items"].append({"name": item["name"], "unit": item.get("unit", ""), "quantity": q, "unit_cost": float(item.get("unit_cost", 0)), "from_id": inv_id, "to_id": target["id"]})
+        doc["items"].append({"name": item["name"], "unit": item.get("unit", ""), "quantity": q, "unit_cost": float(item.get("unit_cost", 0)), "from_id": inv_id, "to_id": target["id"], "created": target["id"] not in existing})
     doc["value"] = round(sum(i["quantity"] * i["unit_cost"] for i in doc["items"]), 2)
     await db.stock_transfers.insert_one({**doc})
     await recompute_product_costs()
@@ -1363,6 +1368,9 @@ async def delete_stock_transfer(transfer_id: str, request: Request):
                 raise HTTPException(status_code=409, detail=f"{doc['to_name']} stoğunda {i['name']} yetersiz; transfer geri alınamaz")
         ref = {"id": doc["id"], "product_name": ""}
         await apply_moves([{"inventory_id": i["to_id"], "delta": -i["quantity"]} for i in doc["items"]], 1, ref, f"Transfer geri alındı → {doc['from_name']}")
+        for i in doc["items"]:
+            if i.get("created"):
+                await db.inventory.delete_many({"id": i["to_id"], "quantity": {"$lte": 1e-9}})
     finally:
         current_rid.reset(token)
     await apply_moves([{"inventory_id": i["from_id"], "delta": i["quantity"]} for i in doc["items"]], 1, {"id": doc["id"], "product_name": ""}, f"Transfer geri alındı ← {doc['to_name']}")
@@ -1547,6 +1555,8 @@ def make_crud(name: str, model: type[BaseModel]):
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
     async def delete_item(item_id: str, request: Request):
+        if name == "tables":
+            await db.kitchen_tickets.delete_many({"table_id": item_id, "status": {"$in": ["Yeni", "Hazırlanıyor"]}})
         if name == "tables" and await db.table_orders.find_one({"table_id": item_id, "status": {"$in": ["Açık", "Kapanıyor"]}}):
             raise HTTPException(status_code=409, detail="Masada açık hesap var; önce hesabı kapatın veya iptal edin")
         old = await db[name].find_one_and_delete({"id": item_id}, {"_id": 0})

@@ -153,3 +153,10 @@
 ## Backlog
 - P1: Per-restaurant sections in nightly/weekly e-mails (now combined)
 - P2: Kitchen display, SKT (expiry) alerts, loyalty, split bill per table
+
+## Iteration 19 (Haziran 2026)
+- Nightly report per restaurant: full_report in all/None mode adds report["restaurants"] (ciro, gider, kâr, payments, kasa) + combined reconciliation; PDF/Excel 'Restoran Bazlı Özet'; email body per-restaurant blocks.
+- Kitchen screen: kitchen_tickets (scoped), Yeni→Hazırlanıyor→Hazır→Teslim edildi; admin nav 'Mutfak' + staff tab; table tile 'Hazır' badge; 8s polling + beep.
+- Split bill: POST /api/tables/{id}/pay (full / amount with equal split / items); pending payments, proportional sales on finalize ('bölünmüş hesap' note); pending remove; cancel blocked after payments.
+- Stock transfers: /api/stock-transfers POST/GET/DELETE(undo), same-name match or create in target; movements both sides.
+- Tested: backend 15/15 + regression; frontend iteration_19 ~95% -> pending-remove bug fixed. Redeploy requested.

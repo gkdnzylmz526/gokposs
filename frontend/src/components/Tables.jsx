@@ -43,7 +43,7 @@ function OrderPanel({ table, products, onChange, onClose, onDone }) {
         ))}
       </div>
       <div className="table-order-total"><span>Hesap</span><strong data-testid="table-order-total">{money(order?.total)}</strong></div>
-      {order?.items?.length > 0 && <PayBox key={`${order.id}-${(order.pending || []).length}-${(order.paid || []).length}`} table={table} onPaid={paid} />}
+      {order?.items?.length > 0 && <PayBox key={order.id} table={table} onPaid={paid} />}
       {order?.items?.length > 0 && !order.pending?.length && !order.paid?.length && <button className="text-button cancel-link" disabled={busy} data-testid="table-cancel-button" onClick={cancel}><Trash2 size={12} /> Hesabı iptal et</button>}
       <ProductPicker products={products} onPick={add} />
     </div>

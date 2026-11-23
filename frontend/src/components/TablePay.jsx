@@ -43,7 +43,7 @@ export const PayBox = ({ table, onPaid }) => {
     setTip(""); setAmount(""); setPicked({});
     return data.closed;
   }, charge >= left - 0.01 && mode !== "items" ? `Masa ${table.name} hesabı kapandı` : `${money(charge)} ${payment} ödeme alındı`);
-  const remove = (p) => run(() => axios.post(`${API}/tables/${table.id}/pending/${p.id}/remove`), "Ödeme kaldırıldı");
+  const remove = (p) => run(async () => { await axios.post(`${API}/tables/${table.id}/pending/${p.id}/remove`); return false; }, "Ödeme kaldırıldı");
   return (
     <div className="table-checkout" data-testid="table-paybox">
       {(pending.length > 0 || order.paid?.length > 0) && <div className="pay-history" data-testid="pay-history">
