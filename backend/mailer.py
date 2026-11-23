@@ -33,13 +33,23 @@ def _send(subject: str, body: str, attachment: tuple[bytes, str] | None = None) 
         smtp.send_message(msg)
 
 
+def restaurant_text(r: dict) -> str:
+    rec, pay = r["reconciliation"], r["payments"]
+    cash = (f"Kasa: beklenen {tl(rec['expected_closing'])} · sayılan {tl(rec['actual_closing'])} · fark {tl(rec['difference'])}" if rec["has_closing"]
+            else f"Kasa: beklenen {tl(rec['expected_closing'])} · KAPANIŞ GİRİLMEDİ")
+    return (f"■ {r['name'].upper()}\n  Ciro: {tl(r['revenue'])} ({r['sales_count']} işlem) · Gider: {tl(r['expenses'])} · Kâr: {tl(r['profit'])}\n"
+            f"  Nakit {tl(pay.get('Nakit'))} · Kart {tl(pay.get('Kart'))} · Yemek kartı {tl(pay.get('Yemek kartı'))}\n  {cash}\n"
+            f"  Kritik stok: {', '.join(i['name'] for i in r['low_stock']) or 'yok'}")
+
+
 def send_report_email(pdf: bytes, report: dict, day: str) -> None:
     rec = report["reconciliation"]
+    per = "\n\n".join(restaurant_text(r) for r in report.get("restaurants", []))
     _send(
         f"GÖKBOSS POS — Gün sonu raporu {day}",
         f"Merhaba,\n\n{day} tarihli gün sonu raporunuz ektedir.\n\n"
-        f"Toplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])}\n"
-        f"Satış işlemi: {report['sales_count']}\nKasa farkı: {tl(rec['difference'])}\n\n{low_stock_text(report.get('low_stock', []))}\n\nGÖKBOSS POS",
+        f"TÜM RESTORANLAR\nToplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])}\n"
+        f"Satış işlemi: {report['sales_count']}\nToplam kasa farkı: {tl(rec['difference'])}\n\n{per}\n\n{low_stock_text(report.get('low_stock', []))}\n\nGÖKBOSS POS",
         (pdf, f"gokboss-pos-gun-sonu-{day}.pdf"),
     )
 

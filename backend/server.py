@@ -76,7 +76,8 @@ async def current_member(request: Request) -> Dict[str, Any]:
     return {**member, "env": ENV, "role": effective_role(member["role"])}
 
 STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
-                ("POST", r"/api/tables/[\w-]+/(items|close|cancel)"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
+                ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
+                ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
 ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
@@ -354,9 +355,31 @@ async def build_report(period: str, start: str | None = None, end: str | None = 
     return {"payments": payment_breakdown(sales), "waste_cost": round(sum(float(w.get("cost", 0)) for w in waste), 2), "waste_count": len(waste), "period": period, "start": begin.isoformat(), "end": (finish - timedelta(seconds=1)).isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales),
             "top_products": sorted(products.values(), key=lambda row: row["quantity"], reverse=True), "sales": sales, "expenses_list": expenses}
 
+REC_KEYS = ("opening", "sales", "cash_sales", "expenses", "expected_closing", "actual_closing", "difference")
+
+async def per_restaurant(period: str, start: str | None, end: str | None) -> List[Dict[str, Any]]:
+    rows = []
+    for r in RESTAURANTS:
+        token = current_rid.set(r["id"])
+        try:
+            rep = await build_report(period, start, end)
+            rec = await cash_reconciliation(None if period != "custom" else end)
+            low = [i for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
+        finally:
+            current_rid.reset(token)
+        rows.append({"id": r["id"], "name": r["name"], "revenue": rep["revenue"], "expenses": rep["expenses"], "profit": rep["profit"], "sales_count": rep["sales_count"],
+                     "payments": rep["payments"], "waste_cost": rep["waste_cost"], "reconciliation": rec, "low_stock": low})
+    return rows
+
 async def full_report(period: str, start: str | None = None, end: str | None = None) -> Dict[str, Any]:
     report = await build_report(period, start, end)
-    report["reconciliation"] = await cash_reconciliation(None if period != "custom" else end)
+    if current_rid.get() in (None, "all"):
+        rows = await per_restaurant(period, start, end)
+        report["restaurants"] = rows
+        report["reconciliation"] = {"date": rows[0]["reconciliation"]["date"], "has_closing": all(r["reconciliation"]["has_closing"] for r in rows),
+                                    **{k: round(sum(r["reconciliation"][k] for r in rows), 2) for k in REC_KEYS}}
+    else:
+        report["reconciliation"] = await cash_reconciliation(None if period != "custom" else end)
     return report
 
 @api.get("/reports")
@@ -385,8 +408,12 @@ async def _deliver(kind: str, trigger: str, key: str | None, job) -> Dict[str, A
 
 async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, Any]:
     async def job(day):
-        report = await full_report("daily")
-        report["low_stock"] = [i for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
+        token = current_rid.set(None)
+        try:
+            report = await full_report("daily")
+        finally:
+            current_rid.reset(token)
+        report["low_stock"] = [{**i, "name": f"{i['name']} ({r['name']})"} for r in report["restaurants"] for i in r["low_stock"]]
         await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
     return await _deliver("daily", trigger, key, job)
 
@@ -1048,10 +1075,21 @@ async def validate_attendance(doc: Dict[str, Any]) -> None:
 def _now_hm() -> str:
     return datetime.now(TZ).strftime("%H:%M")
 
+OPEN_ORDER = {"$in": ["Açık", "Kapanıyor"]}
+
+def _order_total(items: List[Dict[str, Any]]) -> float:
+    return round(sum(float(i["quantity"]) * float(i["unit_price"]) for i in items), 2)
+
+def _pending_sum(pending: List[Dict[str, Any]]) -> float:
+    return round(sum(float(p["amount"]) for p in pending), 2)
+
 async def table_view_rows() -> List[Dict[str, Any]]:
     tables = await db.tables.find({}, {"_id": 0}).sort("name", 1).to_list(None)
-    orders = {o["table_id"]: o for o in await db.table_orders.find({"status": "Açık"}, {"_id": 0}).to_list(None)}
-    return [{**t, "order": orders.get(t["id"])} for t in tables]
+    orders = {o["table_id"]: o for o in await db.table_orders.find({"status": OPEN_ORDER}, {"_id": 0}).to_list(None)}
+    ready: Dict[str, int] = {}
+    for t in await db.kitchen_tickets.find({"status": "Hazır"}, {"_id": 0, "table_id": 1}).to_list(None):
+        ready[t["table_id"]] = ready.get(t["table_id"], 0) + 1
+    return [{**t, "order": orders.get(t["id"]), "ready_count": ready.get(t["id"], 0)} for t in tables]
 
 @api.get("/tables-view")
 async def tables_view():
@@ -1062,15 +1100,40 @@ class TableItemIn(BaseModel):
     product_id: str
     quantity: float
 
-class TableCloseIn(BaseModel):
+class PayItem(BaseModel):
+    product_id: str
+    quantity: float = Field(gt=0)
+
+class TablePayIn(BaseModel):
     payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Yemek kartı)$")
     tip: float = Field(default=0, ge=0)
+    amount: float | None = Field(default=None, gt=0)
+    items: List[PayItem] = []
 
 async def _table(table_id: str) -> Dict[str, Any]:
     table = await db.tables.find_one({"id": table_id}, {"_id": 0})
     if not table:
         raise HTTPException(status_code=404, detail="Masa bulunamadı")
     return table
+
+async def kitchen_add(table: Dict[str, Any], product: Dict[str, Any], quantity: float) -> None:
+    ticket = await db.kitchen_tickets.find_one({"table_id": table["id"], "status": "Yeni"}, {"_id": 0})
+    if not ticket:
+        if quantity <= 0:
+            return
+        ticket = {"id": str(uuid.uuid4()), "table_id": table["id"], "table_name": table["name"], "status": "Yeni", "items": [], "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.kitchen_tickets.insert_one({**ticket})
+    items = ticket["items"]
+    row = next((i for i in items if i["product_id"] == product["id"]), None)
+    if row:
+        row["quantity"] = round(row["quantity"] + quantity, 3)
+    elif quantity > 0:
+        items.append({"product_id": product["id"], "product_name": product["name"], "quantity": quantity})
+    items = [i for i in items if i["quantity"] > 0]
+    if items:
+        await db.kitchen_tickets.update_one({"id": ticket["id"]}, {"$set": {"items": items, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    else:
+        await db.kitchen_tickets.delete_many({"id": ticket["id"]})
 
 @api.post("/tables/{table_id}/items")
 async def table_add_item(table_id: str, body: TableItemIn, request: Request):
@@ -1084,54 +1147,227 @@ async def table_add_item(table_id: str, body: TableItemIn, request: Request):
     if not order:
         if body.quantity < 0:
             raise HTTPException(status_code=422, detail="Masada açık hesap yok")
-        order = {"id": str(uuid.uuid4()), "table_id": table_id, "table_name": table["name"], "status": "Açık", "items": [], "total": 0,
+        if await db.table_orders.find_one({"table_id": table_id, "status": "Kapanıyor"}):
+            raise HTTPException(status_code=409, detail="Masada ödeme alınıyor, birazdan tekrar deneyin")
+        order = {"id": str(uuid.uuid4()), "table_id": table_id, "table_name": table["name"], "status": "Açık", "items": [], "total": 0, "pending": [], "paid": [],
                  "opened_by": getattr(request.state, "member", {}).get("email", ""), "opened_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()}
         await db.table_orders.insert_one({**order})
     items = order["items"]
     row = next((i for i in items if i["product_id"] == product["id"]), None)
+    if row and row["quantity"] + body.quantity < 0:
+        raise HTTPException(status_code=422, detail="Hesaptaki miktardan fazla çıkarılamaz")
     if row:
         row["quantity"] = round(row["quantity"] + body.quantity, 3)
     elif body.quantity > 0:
         items.append({"product_id": product["id"], "product_name": product["name"], "unit_price": float(product.get("price", 0)), "quantity": body.quantity})
+    else:
+        raise HTTPException(status_code=422, detail="Ürün hesapta yok")
     items = [i for i in items if i["quantity"] > 0]
-    total = round(sum(i["quantity"] * i["unit_price"] for i in items), 2)
+    total = _order_total(items)
+    if total < _pending_sum(order.get("pending", [])) - 0.01:
+        raise HTTPException(status_code=422, detail="Alınan kısmi ödemeler hesaptan fazla olamaz; önce ödemeyi kaldırın")
     await db.table_orders.update_one({"id": order["id"]}, {"$set": {"items": items, "total": total}})
+    await kitchen_add(table, product, body.quantity)
     return {**order, "items": items, "total": total}
+
+def _sale_doc(item: Dict[str, Any], quantity: float, amount: float, payment: str, table: Dict[str, Any]) -> Dict[str, Any]:
+    return SalesEntry(product_id=item["product_id"], product_name=item["product_name"], quantity=round(quantity, 4), unit_price=item["unit_price"], channel="Salon",
+                      payment=payment, amount=round(amount, 2), note=f"Masa {table['name']}").model_dump()
+
+async def _save_tip(amount: float, table: Dict[str, Any], payment: str) -> str:
+    if amount <= 0:
+        return ""
+    tip = TipEntry(date=datetime.now(TZ).date().isoformat(), amount=amount, note=f"Masa {table['name']} · {payment}").model_dump()
+    await db.tips.insert_one({**tip})
+    return tip["id"]
+
+async def _pay(order: Dict[str, Any], table: Dict[str, Any], body: TablePayIn, request: Request) -> Dict[str, Any]:
+    items, pending, paid = order["items"], order.get("pending", []), order.get("paid", [])
+    now = datetime.now(timezone.utc).isoformat()
+    async def save(status="Kapanıyor"):
+        await db.table_orders.update_one({"id": order["id"]}, {"$set": {"items": items, "total": _order_total(items), "pending": pending, "paid": paid, "status": status}})
+    if not items:
+        raise HTTPException(status_code=422, detail="Masada ödenecek ürün yok")
+    if body.items:
+        selected = []
+        for pi in body.items:
+            row = next((i for i in items if i["product_id"] == pi.product_id), None)
+            if not row or pi.quantity > row["quantity"] + 1e-9:
+                raise HTTPException(status_code=422, detail="Seçilen ürün miktarı hesapta yok")
+            selected.append((row, pi.quantity))
+        amount = round(sum(q * r["unit_price"] for r, q in selected), 2)
+        if _order_total(items) - amount < _pending_sum(pending) - 0.01:
+            raise HTTPException(status_code=422, detail="Kalan hesap, alınmış kısmi ödemelerden az kalıyor; önce o ödemeleri kaldırın")
+        for row, q in selected:
+            await insert_sale(_sale_doc(row, q, q * row["unit_price"], body.payment, table), request)
+            row["quantity"] = round(row["quantity"] - q, 4)
+            items = [i for i in items if i["quantity"] > 1e-9]
+            await save()
+        paid.append({"id": str(uuid.uuid4()), "kind": "Ürün", "payment": body.payment, "amount": amount, "tip": body.tip, "at": now,
+                     "items": [{"product_name": r["product_name"], "quantity": q} for r, q in selected], "tip_id": await _save_tip(body.tip, table, body.payment)})
+    else:
+        left = round(_order_total(items) - _pending_sum(pending), 2)
+        amount = round(body.amount if body.amount is not None else left, 2)
+        if amount <= 0 or amount > left + 0.01:
+            raise HTTPException(status_code=422, detail=f"En fazla {left:g} ₺ ödeme alınabilir")
+        pending.append({"id": str(uuid.uuid4()), "kind": "Tutar", "payment": body.payment, "amount": min(amount, left), "tip": body.tip, "at": now, "tip_id": await _save_tip(body.tip, table, body.payment)})
+    total = _order_total(items)
+    if items and _pending_sum(pending) >= total - 0.01:
+        await save()
+        for row in items:
+            for p in pending:
+                share = p["amount"] / total
+                await insert_sale(_sale_doc(row, row["quantity"] * share, row["quantity"] * row["unit_price"] * share, p["payment"], table), request)
+        paid.extend(pending)
+        items, pending = [], []
+    closed = not items
+    await db.table_orders.update_one({"id": order["id"]}, {"$set": {"items": items, "total": _order_total(items), "pending": pending, "paid": paid,
+                                     "status": "Kapandı" if closed else "Açık", **({"closed_at": now} if closed else {})}})
+    await audit(request, "Hesap kapattı" if closed else "Ödeme aldı", "tables", table["id"], detail=f"Masa {table['name']} · {paid[-1]['amount'] if closed or body.items else pending[-1]['amount']:g} ₺ · {body.payment}{f' · bahşiş {body.tip:g} ₺' if body.tip else ''}")
+    return {"ok": True, "closed": closed, "remaining": round(_order_total(items) - _pending_sum(pending), 2)}
+
+@api.post("/tables/{table_id}/pay")
+async def table_pay(table_id: str, body: TablePayIn, request: Request):
+    table = await _table(table_id)
+    order = await db.table_orders.find_one_and_update({"table_id": table_id, "status": "Açık"}, {"$set": {"status": "Kapanıyor"}}, projection={"_id": 0})
+    if not order:
+        raise HTTPException(status_code=422, detail="Masada açık hesap yok")
+    try:
+        return await _pay(order, table, body, request)
+    finally:
+        await db.table_orders.update_one({"id": order["id"], "status": "Kapanıyor"}, {"$set": {"status": "Açık"}})
+
+class TableCloseIn(BaseModel):
+    payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Yemek kartı)$")
+    tip: float = Field(default=0, ge=0)
 
 @api.post("/tables/{table_id}/close")
 async def table_close(table_id: str, body: TableCloseIn, request: Request):
-    table = await _table(table_id)
-    order = await db.table_orders.find_one_and_update({"table_id": table_id, "status": "Açık"}, {"$set": {"status": "Kapanıyor"}}, projection={"_id": 0})
-    if not order or not order["items"]:
-        if order:
-            await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Açık"}})
-        raise HTTPException(status_code=422, detail="Masada kapatılacak ürün yok")
-    pending = list(order["items"])
-    try:
-        while pending:
-            i = pending[0]
-            sale = SalesEntry(product_id=i["product_id"], product_name=i["product_name"], quantity=i["quantity"], unit_price=i["unit_price"], channel="Salon",
-                              payment=body.payment, amount=round(i["quantity"] * i["unit_price"], 2), note=f"Masa {table['name']}").model_dump()
-            await insert_sale(sale, request)
-            pending.pop(0)
-    except Exception:
-        total = round(sum(i["quantity"] * i["unit_price"] for i in pending), 2)
-        await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Açık", "items": pending, "total": total}})
-        raise
-    if body.tip > 0:
-        tip = TipEntry(date=datetime.now(TZ).date().isoformat(), amount=body.tip, note=f"Masa {table['name']} · {body.payment}").model_dump()
-        await db.tips.insert_one({**tip})
-    await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Kapandı", "payment": body.payment, "tip": body.tip, "closed_at": datetime.now(timezone.utc).isoformat()}})
-    await audit(request, "Hesap kapattı", "tables", table_id, detail=f"Masa {table['name']} · {order['total']:g} ₺ · {body.payment}{f' · bahşiş {body.tip:g} ₺' if body.tip else ''}")
-    return {"ok": True, "total": order["total"], "sales": len(order["items"])}
+    return await table_pay(table_id, TablePayIn(payment=body.payment, tip=body.tip), request)
+
+@api.post("/tables/{table_id}/pending/{payment_id}/remove")
+async def table_remove_pending(table_id: str, payment_id: str, request: Request):
+    order = await db.table_orders.find_one({"table_id": table_id, "status": "Açık"}, {"_id": 0})
+    payment = next((p for p in (order or {}).get("pending", []) if p["id"] == payment_id), None)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Bekleyen ödeme bulunamadı")
+    await db.table_orders.update_one({"id": order["id"]}, {"$pull": {"pending": {"id": payment_id}}})
+    if payment.get("tip_id"):
+        await db.tips.delete_many({"id": payment["tip_id"]})
+    await audit(request, "Ödeme kaldırdı", "tables", table_id, detail=f"Masa {order['table_name']} · {payment['amount']:g} ₺ {payment['payment']}")
+    return {"ok": True}
 
 @api.post("/tables/{table_id}/cancel")
 async def table_cancel(table_id: str, request: Request):
     table = await _table(table_id)
-    order = await db.table_orders.find_one_and_delete({"table_id": table_id, "status": "Açık"}, {"_id": 0})
+    order = await db.table_orders.find_one({"table_id": table_id, "status": "Açık"}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Masada açık hesap yok")
+    if order.get("pending") or order.get("paid"):
+        raise HTTPException(status_code=409, detail="Bu hesapta ödeme alınmış; iptal yerine kalan tutarı tahsil edin veya bekleyen ödemeleri kaldırın")
+    await db.table_orders.delete_many({"id": order["id"]})
+    await db.kitchen_tickets.delete_many({"table_id": table_id, "status": {"$in": ["Yeni", "Hazırlanıyor"]}})
     await audit(request, "Hesap iptal", "tables", table_id, detail=f"Masa {table['name']} · {order['total']:g} ₺")
+    return {"ok": True}
+
+KITCHEN_FLOW = ("Yeni", "Hazırlanıyor", "Hazır", "Teslim edildi")
+
+class KitchenStatusIn(BaseModel):
+    status: str = Field(pattern="^(Hazırlanıyor|Hazır|Teslim edildi)$")
+
+@api.get("/kitchen")
+async def kitchen():
+    return await db.kitchen_tickets.find({"status": {"$in": list(KITCHEN_FLOW[:3])}}, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+@api.post("/kitchen/{ticket_id}/status")
+async def kitchen_status(ticket_id: str, body: KitchenStatusIn, request: Request):
+    ticket = await db.kitchen_tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Sipariş fişi bulunamadı")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.kitchen_tickets.update_one({"id": ticket_id}, {"$set": {"status": body.status, f"{'ready' if body.status == 'Hazır' else 'started' if body.status == 'Hazırlanıyor' else 'served'}_at": now}})
+    if body.status != "Hazırlanıyor":
+        await audit(request, body.status, "kitchen", ticket_id, detail=f"Masa {ticket['table_name']} · " + ", ".join(f"{i['quantity']:g}× {i['product_name']}" for i in ticket["items"])[:300])
+    return {"id": ticket_id, "status": body.status}
+
+class TransferItem(BaseModel):
+    inventory_id: str
+    quantity: float = Field(gt=0)
+
+class TransferIn(BaseModel):
+    to_restaurant: str
+    items: List[TransferItem] = Field(min_length=1)
+    note: str = Field(default="", max_length=300)
+
+async def _move_in(rid: str, source: Dict[str, Any], quantity: float, ref: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    token = current_rid.set(rid)
+    try:
+        key = _tr_key(source["name"])
+        target = next((i for i in await list_items("inventory", limit=None) if _tr_key(i["name"]) == key), None)
+        if not target:
+            target = InventoryEntry(name=source["name"], unit=source.get("unit", "adet"), minimum=source.get("minimum", 0), unit_cost=source.get("unit_cost", 0),
+                                    target=source.get("target", 0), supplier=source.get("supplier", "")).model_dump()
+            await db.inventory.insert_one({**target})
+        await apply_moves([{"inventory_id": target["id"], "delta": quantity}], 1, ref, reason)
+        return target
+    finally:
+        current_rid.reset(token)
+
+@api.get("/stock-transfers")
+async def stock_transfers():
+    rid = current_rid.get()
+    query = {} if rid in (None, "all") else {"$or": [{"from_restaurant": rid}, {"to_restaurant": rid}]}
+    return await db.stock_transfers.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+@api.post("/stock-transfers")
+async def create_stock_transfer(body: TransferIn, request: Request):
+    src = specific_rid()
+    if body.to_restaurant not in RESTAURANT_IDS or body.to_restaurant == src:
+        raise HTTPException(status_code=422, detail="Farklı bir hedef restoran seçin")
+    wanted: Dict[str, float] = {}
+    for it in body.items:
+        wanted[it.inventory_id] = wanted.get(it.inventory_id, 0) + it.quantity
+    sources = {}
+    for inv_id, q in wanted.items():
+        item = await db.inventory.find_one({"id": inv_id}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=422, detail="Malzeme bu restoranın stoğunda yok")
+        if q > float(item.get("quantity", 0)) + 1e-9:
+            raise HTTPException(status_code=422, detail=f"{item['name']}: stokta yalnızca {float(item.get('quantity', 0)):g} {item.get('unit', '')} var")
+        sources[inv_id] = item
+    doc = {"id": str(uuid.uuid4()), "from_restaurant": src, "to_restaurant": body.to_restaurant, "from_name": RESTAURANT_NAMES[src], "to_name": RESTAURANT_NAMES[body.to_restaurant],
+           "note": body.note, "items": [], "created_by": getattr(request.state, "member", {}).get("email", ""), "created_at": datetime.now(timezone.utc).isoformat()}
+    ref = {"id": doc["id"], "product_name": ""}
+    for inv_id, q in wanted.items():
+        item = sources[inv_id]
+        await apply_moves([{"inventory_id": inv_id, "delta": -q}], 1, ref, f"Transfer → {doc['to_name']}")
+        target = await _move_in(body.to_restaurant, item, q, ref, f"Transfer ← {doc['from_name']}")
+        doc["items"].append({"name": item["name"], "unit": item.get("unit", ""), "quantity": q, "unit_cost": float(item.get("unit_cost", 0)), "from_id": inv_id, "to_id": target["id"]})
+    doc["value"] = round(sum(i["quantity"] * i["unit_cost"] for i in doc["items"]), 2)
+    await db.stock_transfers.insert_one({**doc})
+    await recompute_product_costs()
+    await audit(request, "Transfer", "stock_transfers", doc["id"], detail=f"{doc['from_name']} → {doc['to_name']}: " + ", ".join(f"{i['quantity']:g} {i['unit']} {i['name']}" for i in doc["items"])[:400])
+    return doc
+
+@api.delete("/stock-transfers/{transfer_id}")
+async def delete_stock_transfer(transfer_id: str, request: Request):
+    src = specific_rid()
+    doc = await db.stock_transfers.find_one({"id": transfer_id, "from_restaurant": src}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Transfer bulunamadı (yalnızca gönderen restoran geri alabilir)")
+    token = current_rid.set(doc["to_restaurant"])
+    try:
+        for i in doc["items"]:
+            target = await db.inventory.find_one({"id": i["to_id"]}, {"_id": 0})
+            if not target or float(target.get("quantity", 0)) + 1e-9 < i["quantity"]:
+                raise HTTPException(status_code=409, detail=f"{doc['to_name']} stoğunda {i['name']} yetersiz; transfer geri alınamaz")
+        ref = {"id": doc["id"], "product_name": ""}
+        await apply_moves([{"inventory_id": i["to_id"], "delta": -i["quantity"]} for i in doc["items"]], 1, ref, f"Transfer geri alındı → {doc['from_name']}")
+    finally:
+        current_rid.reset(token)
+    await apply_moves([{"inventory_id": i["from_id"], "delta": i["quantity"]} for i in doc["items"]], 1, {"id": doc["id"], "product_name": ""}, f"Transfer geri alındı ← {doc['to_name']}")
+    await db.stock_transfers.delete_many({"id": transfer_id})
+    await audit(request, "Transfer geri aldı", "stock_transfers", transfer_id, detail=f"{doc['from_name']} → {doc['to_name']}")
     return {"ok": True}
 
 @api.get("/tips/distribution")

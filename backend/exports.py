@@ -33,9 +33,23 @@ def _local(value: str) -> str:
     return datetime.fromisoformat(value).astimezone(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
 
 
+def _restaurant_section(report: dict) -> list:
+    rows = report.get("restaurants")
+    if not rows:
+        return []
+    def line(r):
+        rec, pay = r["reconciliation"], r["payments"]
+        return [r["name"], r["sales_count"], r["revenue"], r["expenses"], r["profit"], pay.get("Nakit", 0), pay.get("Kart", 0), pay.get("Yemek kartı", 0),
+                rec["expected_closing"], rec["actual_closing"] if rec["has_closing"] else "Girilmedi", rec["difference"] if rec["has_closing"] else "-"]
+    total = {"name": "TOPLAM", "sales_count": sum(r["sales_count"] for r in rows), "revenue": report["revenue"], "expenses": report["expenses"], "profit": report["profit"],
+             "payments": {k: sum(r["payments"].get(k, 0) for r in rows) for k in ("Nakit", "Kart", "Yemek kartı")}, "reconciliation": report["reconciliation"]}
+    return [("Restoran Bazlı Özet", ["Restoran", "İşlem", "Ciro", "Gider", "Kâr", "Nakit", "Kart", "Yemek kartı", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"],
+             [line(r) for r in rows] + [line(total)])]
+
+
 def _sections(report: dict) -> list:
     rec = report["reconciliation"]
-    return [
+    return _restaurant_section(report) + [
         ("Dönem Özeti", ["Kalem", "Tutar"], [
             ["Toplam ciro", report["revenue"]], ["Toplam gider", report["expenses"]],
             ["Net kâr", report["profit"]], ["Satış adedi (işlem)", report["sales_count"]]]),
@@ -53,7 +67,7 @@ def _sections(report: dict) -> list:
         [i["name"], i.get("quantity", 0), i.get("minimum", 0), i.get("unit", "")] for i in report["low_stock"]])] if "low_stock" in report else [])
 
 
-MONEY_HEADERS = {"Tutar", "Ciro", "Maliyet", "Kâr", "Birim fiyat"}
+MONEY_HEADERS = {"Tutar", "Ciro", "Maliyet", "Kâr", "Birim fiyat", "Gider", "Nakit", "Kart", "Yemek kartı", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"}
 
 
 def build_excel(report: dict) -> bytes:
@@ -93,6 +107,8 @@ def build_excel(report: dict) -> bytes:
 
 
 def _fmt(header: str, value, is_kalem_money: bool):
+    if isinstance(value, str):
+        return value
     if header in MONEY_HEADERS and (header != "Tutar" or is_kalem_money):
         return tl(value)
     if isinstance(value, float) and value.is_integer():
@@ -108,15 +124,17 @@ def build_pdf(report: dict) -> bytes:
     sub = ParagraphStyle("s", fontName="Sans", fontSize=10, textColor=colors.HexColor("#6B7280"), leading=14)
     h2 = ParagraphStyle("h", fontName="Sans-Bold", fontSize=12, textColor=colors.HexColor(f"#{AMBER}"), spaceBefore=10, spaceAfter=6)
     cell = ParagraphStyle("c", fontName="Sans", fontSize=8.5, leading=11)
+    small = ParagraphStyle("cs", fontName="Sans", fontSize=6.5, leading=8.5)
     story = [Paragraph(f"GÖKBOSS POS — {PERIOD_LABELS[report['period']]} Rapor", title),
              Paragraph(f"Dönem: {report['start'][:10]} — {report['end'][:10]}", sub), Spacer(1, 6)]
     for name, headers, rows in _sections(report):
         story.append(Paragraph(name, h2))
         kalem = headers == ["Kalem", "Tutar"]
-        body = [[Paragraph(escape(_fmt(h, v, not (kalem and "adedi" in str(r[0])))), cell) for h, v in zip(headers, r)] for r in rows]
+        style = small if len(headers) > 8 else cell
+        body = [[Paragraph(escape(_fmt(h, v, not (kalem and "adedi" in str(r[0])))), style) for h, v in zip(headers, r)] for r in rows]
         if not body:
             body = [[Paragraph("Kayıt yok", cell)] + [""] * (len(headers) - 1)]
-        table = Table([[Paragraph(f"<b>{h}</b>", cell) for h in headers]] + body, repeatRows=1,
+        table = Table([[Paragraph(f"<b>{h}</b>", style) for h in headers]] + body, repeatRows=1,
                       colWidths=[doc.width / len(headers)] * len(headers))
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),

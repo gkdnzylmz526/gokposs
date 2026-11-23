@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Toaster, toast } from "sonner";
 import { UserButton } from "@clerk/react";
-import { Armchair, Boxes, Minus, Plus, ReceiptText, Save } from "lucide-react";
+import { Armchair, Boxes, ChefHat, Minus, Plus, ReceiptText, Save } from "lucide-react";
 import { TablesBoard } from "@/components/Tables";
 import { ClockCard } from "@/components/Workforce";
+import { KitchenBoard } from "@/components/Kitchen";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -73,10 +74,11 @@ export default function StaffApp({ me }) {
       <div className="staff-clock-wrap"><ClockCard /></div>
       <nav className="staff-tabs">
         <button className={tab === "tables" ? "active" : ""} data-testid="staff-tab-tables" onClick={() => setTab("tables")}><Armchair size={16} /> Masalar</button>
+        <button className={tab === "kitchen" ? "active" : ""} data-testid="staff-tab-kitchen" onClick={() => setTab("kitchen")}><ChefHat size={16} /> Mutfak</button>
         <button className={tab === "sales" ? "active" : ""} data-testid="staff-tab-sales" onClick={() => setTab("sales")}><ReceiptText size={16} /> Satış gir</button>
         <button className={tab === "stock" ? "active" : ""} data-testid="staff-tab-stock" onClick={() => setTab("stock")}><Boxes size={16} /> Stok sayımı</button>
       </nav>
-      <main className="staff-main">{tab === "tables" ? <TablesBoard refreshKey={data} onChanged={load} /> : tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
+      <main className="staff-main">{tab === "tables" ? <TablesBoard refreshKey={data} onChanged={load} /> : tab === "kitchen" ? <KitchenBoard /> : tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
     </div>
   );
 }
