@@ -58,6 +58,9 @@ class InventoryEntry(Entry):
     quantity: float = 0
     unit: str = "adet"
     minimum: float = 0
+    unit_cost: float = 0
+    target: float = 0
+    supplier: str = ""
 
 class StaffEntry(Entry):
     name: str
@@ -81,6 +84,7 @@ class ProductEntry(Entry):
     cost: float = 0
     active: bool = True
     recipe: List[RecipeItem] = []
+    cost_from_recipe: bool = False
 
 COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry}
 
@@ -259,6 +263,37 @@ async def get_stock_movements(inventory_id: str | None = None):
     query = {"inventory_id": inventory_id} if inventory_id else {}
     return await db.stock_movements.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
+async def with_recipe_cost(doc: Dict[str, Any]) -> Dict[str, Any]:
+    if not doc.get("recipe"):
+        return {**doc, "cost_from_recipe": False}
+    prices = {i["id"]: float(i.get("unit_cost", 0)) for i in await list_items("inventory", limit=None)}
+    cost = sum(float(r["amount"]) * prices.get(r["inventory_id"], 0) for r in doc["recipe"])
+    return {**doc, "cost": round(cost, 2), "cost_from_recipe": True}
+
+async def recompute_product_costs() -> None:
+    for product in await list_items("products", limit=None):
+        if product.get("recipe"):
+            updated = await with_recipe_cost(product)
+            await db.products.update_one({"id": product["id"]}, {"$set": {"cost": updated["cost"], "cost_from_recipe": True}})
+
+def suggested_amount(item: Dict[str, Any]) -> float:
+    target = float(item.get("target") or 0) or float(item.get("minimum", 0)) * 2
+    return round(max(target - float(item.get("quantity", 0)), 0), 3)
+
+@api.get("/order-list")
+async def order_list():
+    groups: Dict[str, Dict[str, Any]] = {}
+    for item in await list_items("inventory", limit=None):
+        if float(item.get("quantity", 0)) > float(item.get("minimum", 0)):
+            continue
+        amount = suggested_amount(item)
+        supplier = item.get("supplier") or "Tedarikçi belirtilmemiş"
+        group = groups.setdefault(supplier, {"supplier": supplier, "items": [], "estimated_total": 0})
+        cost = round(amount * float(item.get("unit_cost", 0)), 2)
+        group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost})
+        group["estimated_total"] = round(group["estimated_total"] + cost, 2)
+    return sorted(groups.values(), key=lambda g: g["supplier"])
+
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
     async def get_items():
@@ -266,12 +301,16 @@ def make_crud(name: str, model: type[BaseModel]):
     @api.post(f"/{name}", response_model=model)
     async def create_item(item: model):
         doc = item.model_dump()
+        if name == "products":
+            doc = await with_recipe_cost(doc)
         if name == "sales":
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış")
         await db[name].insert_one({**doc})
         if name == "inventory" and doc["quantity"]:
             await log_movement(doc, doc["quantity"], "İlk kayıt")
+        if name == "inventory":
+            await recompute_product_costs()
         return model(**doc)
     @api.put(f"/{name}/{{item_id}}", response_model=model)
     async def update_item(item_id: str, item: model):
@@ -279,6 +318,8 @@ def make_crud(name: str, model: type[BaseModel]):
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
+        if name == "products":
+            doc = await with_recipe_cost(doc)
         if name == "sales":
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış düzeltildi (eski kayıt geri alındı)")
             doc["stock_moves"] = await stock_moves(doc)
@@ -286,6 +327,8 @@ def make_crud(name: str, model: type[BaseModel]):
         await db[name].replace_one({"id": item_id}, doc)
         if name == "inventory" and float(doc["quantity"]) != float(old.get("quantity", 0)):
             await log_movement(doc, float(doc["quantity"]) - float(old.get("quantity", 0)), "Manuel sayım / düzeltme")
+        if name == "inventory":
+            await recompute_product_costs()
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
     async def delete_item(item_id: str):
@@ -296,6 +339,7 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
+            await recompute_product_costs()
         return {"ok": True}
     return get_items, create_item, update_item, delete_item
 
