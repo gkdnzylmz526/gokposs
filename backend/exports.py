@@ -48,7 +48,8 @@ def _sections(report: dict) -> list:
              s.get("quantity", 1), s.get("unit_price", 0), s.get("amount", 0)] for s in report["sales"]]),
         ("Gider Kayıtları", ["Tarih", "Kategori", "Açıklama", "Tutar"], [
             [_local(e.get("created_at")), e.get("category", ""), e.get("note", ""), e.get("amount", 0)] for e in report["expenses_list"]]),
-    ]
+    ] + ([("Kritik Stok", ["Malzeme", "Mevcut", "Minimum", "Birim"], [
+        [i["name"], i.get("quantity", 0), i.get("minimum", 0), i.get("unit", "")] for i in report["low_stock"]])] if "low_stock" in report else [])
 
 
 MONEY_HEADERS = {"Tutar", "Ciro", "Maliyet", "Kâr", "Birim fiyat"}

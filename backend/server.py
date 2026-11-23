@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Query, Request
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
@@ -171,6 +172,7 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
     record = {"id": str(uuid.uuid4()), "date": day, "trigger": trigger, "key": key, "recipient": os.environ.get("REPORT_RECIPIENT", ""), "created_at": datetime.now(timezone.utc).isoformat()}
     try:
         report = await full_report("daily")
+        report["low_stock"] = [i for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
         await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
         record["status"] = "sent"
     except Exception as exc:
@@ -240,9 +242,22 @@ async def stock_moves(sale: Dict[str, Any]) -> List[Dict[str, Any]]:
     match = next((i for i in await list_items("inventory", limit=None) if key and _tr_key(i["name"]) == key), None)
     return [{"inventory_id": match["id"], "delta": -quantity}] if match else []
 
-async def apply_moves(moves: List[Dict[str, Any]], sign: int) -> None:
+async def log_movement(item: Dict[str, Any], delta: float, reason: str, sale: Dict[str, Any] | None = None) -> None:
+    await db.stock_movements.insert_one({"id": str(uuid.uuid4()), "inventory_id": item["id"], "inventory_name": item["name"], "unit": item.get("unit", ""), "delta": round(delta, 3),
+        "quantity_after": item["quantity"], "reason": reason, "sale_id": (sale or {}).get("id", ""), "product_name": (sale or {}).get("product_name", ""),
+        "sale_quantity": (sale or {}).get("quantity", 0), "created_at": datetime.now(timezone.utc).isoformat()})
+
+async def apply_moves(moves: List[Dict[str, Any]], sign: int, sale: Dict[str, Any], reason: str) -> None:
     for move in moves:
-        await db.inventory.update_one({"id": move["inventory_id"]}, [{"$set": {"quantity": {"$round": [{"$add": ["$quantity", move["delta"] * sign]}, 3]}}}])
+        delta = move["delta"] * sign
+        item = await db.inventory.find_one_and_update({"id": move["inventory_id"]}, [{"$set": {"quantity": {"$round": [{"$add": ["$quantity", delta]}, 3]}}}], projection={"_id": 0}, return_document=ReturnDocument.AFTER)
+        if item:
+            await log_movement(item, delta, reason, sale)
+
+@api.get("/stock-movements")
+async def get_stock_movements(inventory_id: str | None = None):
+    query = {"inventory_id": inventory_id} if inventory_id else {}
+    return await db.stock_movements.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
@@ -253,8 +268,10 @@ def make_crud(name: str, model: type[BaseModel]):
         doc = item.model_dump()
         if name == "sales":
             doc["stock_moves"] = await stock_moves(doc)
-            await apply_moves(doc["stock_moves"], 1)
+            await apply_moves(doc["stock_moves"], 1, doc, "Satış")
         await db[name].insert_one({**doc})
+        if name == "inventory":
+            await log_movement(doc, doc["quantity"], "İlk kayıt")
         return model(**doc)
     @api.put(f"/{name}/{{item_id}}", response_model=model)
     async def update_item(item_id: str, item: model):
@@ -263,10 +280,12 @@ def make_crud(name: str, model: type[BaseModel]):
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
         if name == "sales":
-            await apply_moves(old.get("stock_moves", []), -1)
+            await apply_moves(old.get("stock_moves", []), -1, old, "Satış düzeltildi (eski kayıt geri alındı)")
             doc["stock_moves"] = await stock_moves(doc)
-            await apply_moves(doc["stock_moves"], 1)
+            await apply_moves(doc["stock_moves"], 1, doc, "Satış düzeltildi (yeni kayıt)")
         await db[name].replace_one({"id": item_id}, doc)
+        if name == "inventory" and float(doc["quantity"]) != float(old.get("quantity", 0)):
+            await log_movement(doc, float(doc["quantity"]) - float(old.get("quantity", 0)), "Manuel sayım / düzeltme")
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
     async def delete_item(item_id: str):
@@ -274,7 +293,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         if name == "sales":
-            await apply_moves(old.get("stock_moves", []), -1)
+            await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         return {"ok": True}
     return get_items, create_item, update_item, delete_item
 
