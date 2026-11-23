@@ -29,7 +29,7 @@ export const StockMovements = ({ inventory, refreshKey }) => {
         <div className="table-row movements-grid" key={m.id} data-testid={`stock-movement-row-${i}`}>
           <span>{new Date(m.created_at).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })}</span>
           <span>{m.inventory_name}</span>
-          <span className={`table-amount ${m.delta < 0 ? "danger-text" : "green-text"}`}>{m.delta > 0 ? "+" : ""}{num(m.delta)} {m.unit}</span>
+          <span className={`table-amount movement-delta ${m.delta < 0 ? "neg" : "pos"}`}>{m.delta > 0 ? "+" : ""}{num(m.delta)} {m.unit}</span>
           <span>{num(m.quantity_after)} {m.unit}</span>
           <span>{m.reason}{m.product_name ? ` · ${m.product_name} × ${num(m.sale_quantity)}` : ""}</span>
         </div>

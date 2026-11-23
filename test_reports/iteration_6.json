@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 6: tested stock movement history (API + UI), low stock in mailer/PDF (Python level only, no SMTP), the Turkish shadcn calendar for the custom report range, and regressions. Backend: 5/5 new pytest cases passed, plus 16/16 regression cases from iteration 5 (CRUD, recipe stock, custom range, exports; cron/email tests were skipped on purpose). Every movement type is logged correctly: İlk kayıt; Satış with negative delta, product_name and sale_quantity; edit logs a reversal and then the new record, newest first; delete logs 'Satış silindi (stok iade)'; a manual quantity edit logs the diff; an edit that does not change quantity logs nothing. The ?inventory_id filter works and _id is excluded. low_stock_text output is correct. The PDF includes 'Kritik Stok' only when low_stock is present. UI: the movements panel updates after adding, editing and deleting a sale and after a manual stock edit, and the filter select works. The calendar has Turkish month and day names (Kasım 2026, Pt..Pz, Monday first). Picking a day closes the popover and shows dd.MM.yyyy. End dates before the start are disabled. The summary updates (₺300, top product). PDF and XLSX downloads work for the range. At 390px there is no horizontal page overflow and the calendar fits. No functional bugs found. All created data was deleted, and stock_movements, report_deliveries and cron_runs were cleared as requested.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/inventory/{id}", "issue": "Deleting an inventory item logs no movement and leaves its old movements. Under 'Tüm malzemeler' they still show, but the item no longer appears in the filter dropdown. Consider logging a 'Silindi' movement or hiding/flagging orphaned movements."},
+      {"endpoint": "PUT /api/inventory/{id}", "issue": "replace_one overwrites quantity with the client value. If a sale deducts stock while the edit modal is open, that deduction is silently lost, and the logged diff is relative to the stale old value (race condition)."},
+      {"endpoint": "GET /api/stock-movements", "issue": "Hard-coded limit of 200 with no pagination or date filter."},
+      {"endpoint": "POST /api/inventory", "issue": "An item created with quantity 0 logs an 'İlk kayıt' movement with a 0 delta (noise)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Stok Sayımı > Stok hareketleri", "issues": ["Negative deltas use .danger-text, which has margin-left:auto and font-size:10px. As a result, negative values are right-aligned and smaller, while positive (.green-text) values are left-aligned at 12px. The Değişim column looks misaligned. Use a separate class for the movements delta, without margin-left/font-size."]},
+      {"screen": "Mobile 390px movements table", "issues": ["The Neden column is cut off. It needs a horizontal scroll inside the panel, and dates wrap onto 2 lines. Consider a stacked layout on mobile."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration6_stock_movements.py", "/app/test_reports/pytest/pytest_iter6.xml"],
+  "action_items": [
+    "Fix alignment and font size of negative deltas in the StockMovements Değişim column (the .danger-text margin-left:auto)",
+    "Optional: log or handle movements when an inventory item is deleted; make inventory quantity edits race-safe (e.g. $inc the diff instead of replacing)"
+  ],
+  "critical_code_review_comments": [
+    "update_item for inventory replaces the whole doc, including quantity. Concurrent sales can be lost.",
+    "Reports highlight uses new Date('YYYY-MM-DD').toLocaleDateString, which is parsed as UTC. For users west of UTC it shows the previous day. Use date-fns parseISO/format, as DatePicker does.",
+    "send_daily_report adds low_stock, but /api/reports/export PDF/XLSX downloads do not include Kritik Stok (may be intended)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration6_stock_movements.py"],
+  "success_rate": {"backend": "100% (5/5 new + 16/16 regression)", "frontend": "100% functional (1 minor alignment issue)"},
+  "seed_data_creation": "None kept. TEST_Kofte/TEST_Ekmek/TEST_Burger and the sales created in the UI were deleted by id. stock_movements (32), report_deliveries (0) and cron_runs (0) were cleared on request. All collections are empty.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest tests/test_iteration6_stock_movements.py -p no:xdist -o addopts='' (it cleans up CRUD records, but stock_movements remain and must be cleared). For iteration 5 regression, use -k 'update or recipe or name_match or custom' to skip the cron/email tests that would attempt real Gmail sends. Row delete in the UI needs a confirm click: {testId}-delete then {testId}-confirm-delete. Note that the [data-testid^=sales-row-] prefix also matches the action buttons.",
+  "rca of the issue": "Delta misalignment: App.css line 6 '.danger-text { margin-left:auto; font-size:10px; font-weight:700 }' is meant for list rows. Reusing it in the movements grid pushes the span content right and shrinks the font."
+}

@@ -270,7 +270,7 @@ def make_crud(name: str, model: type[BaseModel]):
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış")
         await db[name].insert_one({**doc})
-        if name == "inventory":
+        if name == "inventory" and doc["quantity"]:
             await log_movement(doc, doc["quantity"], "İlk kayıt")
         return model(**doc)
     @api.put(f"/{name}/{{item_id}}", response_model=model)
@@ -294,6 +294,8 @@ def make_crud(name: str, model: type[BaseModel]):
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         if name == "sales":
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
+        if name == "inventory":
+            await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
         return {"ok": True}
     return get_items, create_item, update_item, delete_item
 

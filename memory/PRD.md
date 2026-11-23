@@ -66,3 +66,10 @@
 - Stock deduction on sale: product recipe (inventory_id, amount) or same-name inventory fallback (Turkish-aware match); applied moves stored on sale (stock_moves) and reversed on edit/delete.
 - Gün sonu e-postası: Gmail SMTP (mailer.py, GMAIL_USERNAME / GMAIL_APP_PASSWORD), recipient REPORT_RECIPIENT, cron .emergent/crons.yml 23:59 Europe/Istanbul -> POST /api/cron/daily-report (Bearer WEBHOOK_CRON_SECRET), manual POST /api/email/send-now, GET /api/email/status.
 - Tested: iteration_5.json; fixes applied for 502->200 failed status, empty cron body, negative profit color, sticky mobile actions, rounding.
+
+## Iteration 6 (Haziran 2026)
+- Stock movement log (stock_movements collection, GET /api/stock-movements) for initial, sale, sale edit/delete, manual count, item delete; UI panel in Stok Sayımı with filter.
+- Nightly email body + PDF include Kritik Stok list.
+- Turkish calendar date picker (shadcn Calendar, tr locale, dd.MM.yyyy) for custom report range.
+- Tested iteration_6.json: no functional bugs; design nits fixed.
+- PENDING: valid 16-letter Gmail app password (current GMAIL_APP_PASSWORD rejected by Gmail).
