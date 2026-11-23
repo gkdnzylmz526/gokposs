@@ -1,4 +1,6 @@
+from datetime import datetime
 from io import BytesIO
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -13,8 +15,9 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 FONT_DIR = Path(__file__).parent / "fonts"
-pdfmetrics.registerFont(TTFont("Sans", str(FONT_DIR / "LiberationSans-Regular.ttf")))
-pdfmetrics.registerFont(TTFont("Sans-Bold", str(FONT_DIR / "LiberationSans-Bold.ttf")))
+pdfmetrics.registerFont(TTFont("Sans", str(FONT_DIR / "NotoSans-Regular.ttf")))
+pdfmetrics.registerFont(TTFont("Sans-Bold", str(FONT_DIR / "NotoSans-Bold.ttf")))
+pdfmetrics.registerFontFamily("Sans", normal="Sans", bold="Sans-Bold", italic="Sans", boldItalic="Sans-Bold")
 
 PERIOD_LABELS = {"daily": "Günlük", "weekly": "Haftalık", "monthly": "Aylık"}
 AMBER = "D97706"
@@ -23,6 +26,10 @@ AMBER = "D97706"
 def tl(value) -> str:
     text = f"{float(value or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{text} ₺"
+
+
+def _local(value: str) -> str:
+    return datetime.fromisoformat(value).astimezone(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
 
 
 def _sections(report: dict) -> list:
@@ -37,10 +44,10 @@ def _sections(report: dict) -> list:
         ("Ürün Performansı", ["Ürün", "Adet", "Ciro", "Maliyet", "Kâr"], [
             [p["product_name"], p["quantity"], p["revenue"], p["cost"], p["profit"]] for p in report["top_products"]]),
         ("Satış Kayıtları", ["Tarih", "Ürün", "Kanal", "Adet", "Birim fiyat", "Tutar"], [
-            [s.get("created_at", "")[:16].replace("T", " "), s.get("product_name") or s.get("note") or "-", s.get("channel", ""),
+            [_local(s.get("created_at")), s.get("product_name") or s.get("note") or "-", s.get("channel", ""),
              s.get("quantity", 1), s.get("unit_price", 0), s.get("amount", 0)] for s in report["sales"]]),
         ("Gider Kayıtları", ["Tarih", "Kategori", "Açıklama", "Tutar"], [
-            [e.get("created_at", "")[:16].replace("T", " "), e.get("category", ""), e.get("note", ""), e.get("amount", 0)] for e in report["expenses_list"]]),
+            [_local(e.get("created_at")), e.get("category", ""), e.get("note", ""), e.get("amount", 0)] for e in report["expenses_list"]]),
     ]
 
 

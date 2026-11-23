@@ -1,0 +1,39 @@
+{
+  "summary": "Tested the iteration-4 changes on the backend and frontend: real XLSX/PDF exports, removal of demo data, the dashboard weekly array, report shape, cash reconciliation, all CRUD modals, downloads and mobile layout. One real bug: in the PDF every Turkish Lira sign (₺) shows as an empty box, because the bundled Liberation Sans 1.07.4 fonts have no U+20BA glyph. Everything else passed. When testing finished the DB was empty: all records I created and the main agent's 2 seed records were deleted by id.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/reports/export?format=pdf", "issue": "The ₺ symbol shows as an empty box in every money cell. Text extraction gives \\x00. Cause: /app/backend/fonts/LiberationSans-*.ttf is version 1.07.4 and its cmap has no U+20BA. The other Turkish letters (ğ ş ı İ ö ü ç Ö Ü Ç â) and − show correctly.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/reports/export?format=pdf", "issue": "Table headers use <b>...</b> in Paragraph, but registerFontFamily('Sans', normal='Sans', bold='Sans-Bold') is never called. The headers render in the regular weight, not bold, and a Helvetica (F1) font gets embedded."},
+      {"endpoint": "dashboard / reports / reconciliation", "issue": "'Today' and the period windows use UTC dates. For a Turkish restaurant (UTC+3), sales made between 00:00 and 03:00 local time count toward the previous day."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Overview weekly chart", "issues": ["Days with zero revenue or expenses still show small stub bars (CSS min-height), so an empty week looks like it has a little data. Consider 0 height or a muted baseline."]},
+      {"screen": "Reports download", "issues": ["The frontend sets link.download to 'gokboss-pos-{period}-rapor.{ext}', which overrides the dated filename the backend sends in Content-Disposition. The anchor is never added to the DOM, and revokeObjectURL runs right after click(), which can break downloads in Firefox and Safari. Works in Chromium."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_exports.py", "/app/test_reports/pytest/pytest_results_iter4.xml"],
+  "action_items": [
+    "Fix the missing ₺ glyph in the PDF. Bundle a font that has U+20BA, such as DejaVuSans / DejaVuSans-Bold or Liberation Sans 2.x, and register it in exports.py. The other option is to write 'TL' instead of '₺' in the PDF.",
+    "Call pdfmetrics.registerFontFamily('Sans', normal='Sans', bold='Sans-Bold', italic='Sans', boldItalic='Sans-Bold') so the <b> headers come out bold.",
+    "Optional: escape user text (xml.sax.saxutils.escape) before passing it to Paragraph in build_pdf. In this test '&' and '<' happened not to crash it, but escaping is safer.",
+    "Optional: use the server's Content-Disposition filename, append the anchor to the DOM, and delay revokeObjectURL."
+  ],
+  "critical_code_review_comments": [
+    "exports.py: user strings (product names, notes) are placed straight into reportlab Paragraph markup. Values like '<b' or '&amp' could produce broken or garbled PDFs. Escape them first.",
+    "server.py: list_items for the dashboard lists is capped at 100 docs. The weekly and today totals use separate unlimited queries, so they are correct, but the lists are truncated.",
+    "server.py: uses @app.on_event('shutdown'), which is deprecated. Prefer a lifespan handler (minor)."
+  ],
+  "updated_files": ["/app/backend/tests/test_exports.py", "/app/test_reports/iteration_4.json"],
+  "success_rate": {"backend": "79% (11/14 pytest; the 3 failures are the same ₺ glyph bug in daily/weekly/monthly PDF)", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_ sales, expenses, cash, product, inventory and staff records through pytest and the UI. All were deleted by id, along with the main agent's 2 records (sale 3dfbe7e7..., expense 4a6b2fb0...) as requested. Every collection is now empty (verified with GET).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_exports.py needs pymupdf (fitz) for PDF text extraction. I pip-installed it in the test env; it is not in requirements. The DB was left empty on purpose for the user's real use, so any test must clean up after itself. Verified on desktop: modal adds update the metrics, the chart (today's bar), the recent-sales list, stock alerts, reconciliation (opening from the earliest log, closing from the latest) and the reports. All 6 downloads (3 periods x pdf/xlsx) fired real files. No 2024 dates, the current date is shown, no demo data appears on an empty DB, and the 390px mobile layout has no horizontal overflow.",
+  "rca of the issue": "The ₺ boxes in the PDF come from the font: Liberation Sans 1.07.4 predates the Turkish Lira sign (Unicode 6.2, 2012) and has no glyph for it. I confirmed this with fontTools: 0x20BA is not in the cmap. Reproduce: GET /api/reports/export?period=daily&format=pdf, then render or extract the text; each money value ends with \\x00 or a tofu box. Fix: switch to a font that has the glyph (DejaVu Sans or Liberation Sans 2.x)."
+}

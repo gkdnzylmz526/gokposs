@@ -50,3 +50,12 @@
 1. Ürün kataloğu ve ürün bazlı satış girişini ekle.
 2. Gerçek haftalık/aylık tarih filtrelerini bağla.
 3. Kasa kapanışını otomatik ciro-gider mutabakatına dönüştür.
+## Iteration 4 (Haziran 2026)
+- Real XLSX (openpyxl) + PDF (reportlab, bundled Noto Sans fonts for ₺/Turkish chars) exports: GET /api/reports/export?period=&format=xlsx|pdf. Includes summary, cash reconciliation, product performance, all sales & expense records.
+- Removed all frontend demo/fallback data; empty states everywhere; real current date; real 7-day chart from /api/dashboard `weekly`.
+- Dashboard metrics now today-only; all day boundaries use Europe/Istanbul timezone.
+- Tested: iteration_4.json (only ₺ PDF glyph bug — fixed).
+
+## Backlog
+- P1: Split App.js into components
+- P2: Authentication (user deferred), record edit/delete in UI, date-range custom report filter

@@ -5,6 +5,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
@@ -21,6 +22,10 @@ load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
 api = APIRouter(prefix="/api")
+TZ = ZoneInfo("Europe/Istanbul")
+
+def local_day(value: str) -> str:
+    return datetime.fromisoformat(value).astimezone(TZ).date().isoformat()
 
 class Entry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -86,13 +91,14 @@ async def dashboard():
     staff = await list_items("staff")
     cash = await list_items("cash")
     products = await list_items("products")
-    today = datetime.now(timezone.utc).date()
-    week_sales = await list_items("sales", (today - timedelta(days=6)).isoformat(), None)
-    week_expenses = await list_items("expenses", (today - timedelta(days=6)).isoformat(), None)
+    today = datetime.now(TZ).date()
+    week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
+    week_sales = await list_items("sales", week_start, None)
+    week_expenses = await list_items("expenses", week_start, None)
     weekly = []
     for offset in range(6, -1, -1):
         day = (today - timedelta(days=offset)).isoformat()
-        weekly.append({"date": day, "revenue": _total(i for i in week_sales if i["created_at"][:10] == day), "expenses": _total(i for i in week_expenses if i["created_at"][:10] == day)})
+        weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
     return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products}
@@ -100,10 +106,11 @@ async def dashboard():
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly)$")
 
 async def build_report(period: str) -> Dict[str, Any]:
-    now = datetime.now(timezone.utc)
-    start = datetime.combine(now.date() - timedelta(days={"daily": 0, "weekly": 6, "monthly": 29}[period]), datetime.min.time(), timezone.utc)
-    sales = await list_items("sales", start.isoformat(), None)
-    expenses = await list_items("expenses", start.isoformat(), None)
+    now = datetime.now(TZ)
+    start = datetime.combine(now.date() - timedelta(days={"daily": 0, "weekly": 6, "monthly": 29}[period]), datetime.min.time(), TZ)
+    since = start.astimezone(timezone.utc).isoformat()
+    sales = await list_items("sales", since, None)
+    expenses = await list_items("expenses", since, None)
     products = {}
     for item in sales:
         name = item.get("product_name") or item.get("note") or "Diğer satış"
@@ -125,19 +132,20 @@ async def reports(period: str = PERIOD):
 async def export_report(period: str = PERIOD, format: str = Query("xlsx", pattern="^(xlsx|pdf)$")):
     report = await build_report(period)
     report["reconciliation"] = await cash_reconciliation()
-    name = f"gokboss-pos-{period}-rapor-{datetime.now(timezone.utc).date().isoformat()}.{format}"
+    name = f"gokboss-pos-{period}-rapor-{datetime.now(TZ).date().isoformat()}.{format}"
     if format == "pdf":
         return Response(build_pdf(report), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
     return Response(build_excel(report), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @api.get("/cash/reconciliation")
 async def cash_reconciliation(date: str | None = None):
-    target = date or datetime.now(timezone.utc).date().isoformat()
+    target = date or datetime.now(TZ).date().isoformat()
+    since = datetime.combine(datetime.fromisoformat(target).date(), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     def same_day(item):
-        return (item.get("created_at", "")[:10] == target)
-    sales = [item for item in await list_items("sales", target, None) if same_day(item)]
-    expenses = [item for item in await list_items("expenses", target, None) if same_day(item)]
-    cash_logs = [item for item in await list_items("cash", target, None) if same_day(item)]
+        return local_day(item["created_at"]) == target
+    sales = [item for item in await list_items("sales", since, None) if same_day(item)]
+    expenses = [item for item in await list_items("expenses", since, None) if same_day(item)]
+    cash_logs = [item for item in await list_items("cash", since, None) if same_day(item)]
     opening = float(cash_logs[-1].get("opening", 0)) if cash_logs else 0
     actual = float(cash_logs[0].get("closing", 0)) if cash_logs else 0
     sales_total, expenses_total = _total(sales), _total(expenses)
