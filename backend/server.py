@@ -1089,7 +1089,7 @@ async def table_view_rows() -> List[Dict[str, Any]]:
     ready: Dict[str, int] = {}
     for t in await db.kitchen_tickets.find({"status": "Hazır"}, {"_id": 0, "table_id": 1}).to_list(None):
         ready[t["table_id"]] = ready.get(t["table_id"], 0) + 1
-    return [{**t, "order": orders.get(t["id"]), "ready_count": ready.get(t["id"], 0)} for t in tables]
+    return [{**t, "order": orders.get(t["id"]), "ready_count": ready.get(t["id"], 0) if t["id"] in orders else 0} for t in tables]
 
 @api.get("/tables-view")
 async def tables_view():
@@ -1305,8 +1305,8 @@ async def _move_in(rid: str, source: Dict[str, Any], quantity: float, ref: Dict[
         key = _tr_key(source["name"])
         target = next((i for i in await list_items("inventory", limit=None) if _tr_key(i["name"]) == key), None)
         if not target:
-            target = InventoryEntry(name=source["name"], unit=source.get("unit", "adet"), minimum=source.get("minimum", 0), unit_cost=source.get("unit_cost", 0),
-                                    target=source.get("target", 0), supplier=source.get("supplier", "")).model_dump()
+            target = InventoryEntry(name=source["name"], unit=source.get("unit", "adet"), minimum=0, unit_cost=source.get("unit_cost", 0),
+                                    target=0, supplier=source.get("supplier", "")).model_dump()
             await db.inventory.insert_one({**target})
         await apply_moves([{"inventory_id": target["id"], "delta": quantity}], 1, ref, reason)
         return target

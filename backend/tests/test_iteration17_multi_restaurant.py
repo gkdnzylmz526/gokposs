@@ -144,7 +144,7 @@ def test_table_close_creates_sales_tip_and_stock():
     assert s.post(f"{BASE}/tables/{S['table']}/close", json={"payment": "Bitcoin"}).status_code == 422
     r = s.post(f"{BASE}/tables/{S['table']}/close", json={"payment": "Kart", "tip": 15})
     assert r.status_code == 200, r.text
-    assert r.json()["sales"] == 1 and r.json()["total"] == 200
+    assert r.json()["closed"] is True and r.json()["remaining"] == 0  # it19: pay-endpoint response shape
     sales = [x for x in s.get(f"{BASE}/sales").json() if x.get("product_id") == S["prod"]]
     assert len(sales) == 1 and sales[0]["payment"] == "Kart" and sales[0]["amount"] == 200 and sales[0]["channel"] == "Salon"
     S["table_sale"] = sales[0]["id"]
