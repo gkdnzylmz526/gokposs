@@ -7,13 +7,13 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
 const num = (n) => Number(Number(n || 0).toFixed(3)).toLocaleString("tr-TR");
 
-export const OrderHistory = ({ suppliers, refreshKey }) => {
+export const OrderHistory = ({ suppliers, refreshKey, onReload }) => {
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("");
   const load = () => axios.get(`${API}/orders`).then(({ data }) => setOrders(data)).catch(() => setOrders([]));
   useEffect(() => { load(); }, [refreshKey]);
-  const toggle = async (o) => { const delivering = o.status !== "Teslim alındı"; if (!window.confirm(delivering ? "Sipariş teslim alındı olarak işaretlensin mi?\nKalemler stoka eklenecek, alış fiyatları güncellenecek ve bir gider kaydı oluşturulacak." : "Teslimat geri alınsın mı?\nEklenen stok çıkarılacak ve oluşturulan gider kaydı silinecek.")) return; try { await axios.put(`${API}/orders/${o.id}`, { ...o, status: o.status === "Teslim alındı" ? "Gönderildi" : "Teslim alındı" }); load(); toast.success(delivering ? "Teslim alındı · stok ve gider güncellendi" : "Teslimat geri alındı"); } catch { toast.error("Durum güncellenemedi"); } };
-  const remove = async (o) => { if (!window.confirm("Bu sipariş kaydı silinsin mi?")) return; try { await axios.delete(`${API}/orders/${o.id}`); load(); } catch { toast.error("Silinemedi"); } };
+  const toggle = async (o) => { const delivering = o.status !== "Teslim alındı"; if (!window.confirm(delivering ? "Sipariş teslim alındı olarak işaretlensin mi?\nKalemler stoka eklenecek, alış fiyatları güncellenecek ve bir gider kaydı oluşturulacak." : "Teslimat geri alınsın mı?\nEklenen stok çıkarılacak ve oluşturulan gider kaydı silinecek (güncellenen alış fiyatı geri alınmaz).")) return; try { await axios.put(`${API}/orders/${o.id}`, { ...o, status: o.status === "Teslim alındı" ? "Gönderildi" : "Teslim alındı" }); await onReload(); toast.success(delivering ? "Teslim alındı · stok ve gider güncellendi" : "Teslimat geri alındı"); } catch { toast.error("Durum güncellenemedi"); } };
+  const remove = async (o) => { if (!window.confirm("Bu sipariş kaydı silinsin mi?")) return; try { await axios.delete(`${API}/orders/${o.id}`); await onReload(); } catch { toast.error("Silinemedi"); } };
   const names = [...new Set([...suppliers.map((s) => s.name), ...orders.map((o) => o.supplier)])];
   const shown = orders.filter((o) => !filter || o.supplier === filter);
   return (

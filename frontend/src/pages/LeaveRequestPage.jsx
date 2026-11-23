@@ -33,8 +33,8 @@ export default function LeaveRequestPage({ token }) {
             <div className="public-balance" data-testid="leave-request-balance"><CalendarCheck size={18} /> Yıllık izin hakkınız: <b>{info.balance.remaining} / {info.balance.total} gün</b> kaldı</div>
             <div className="form-grid">
               <div className="public-dates">
-                <DatePicker label="Başlangıç" testId="leave-request-start" value={form.start} max={form.end} onChange={(v) => setForm({ ...form, start: v })} />
-                <DatePicker label="Bitiş" testId="leave-request-end" value={form.end} min={form.start} onChange={(v) => setForm({ ...form, end: v })} />
+                <DatePicker label="Başlangıç" testId="leave-request-start" value={form.start} min={new Date(Date.now() - 7 * 864e5).toLocaleDateString("sv-SE")} max={form.end} onChange={(v) => setForm({ ...form, start: v })} />
+                <DatePicker label="Bitiş" testId="leave-request-end" value={form.end} min={form.start || new Date(Date.now() - 7 * 864e5).toLocaleDateString("sv-SE")} onChange={(v) => setForm({ ...form, end: v })} />
               </div>
               <label>İzin türü<select value={form.type} data-testid="leave-request-type" onChange={(e) => setForm({ ...form, type: e.target.value })}>{info.types.map((t) => <option key={t}>{t}</option>)}</select></label>
               <label>Not (isteğe bağlı)<input value={form.note} maxLength={300} data-testid="leave-request-note" placeholder="örn. aile ziyareti" onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>

@@ -18,7 +18,7 @@ export const DatePicker = ({ label, value, onChange, min, max, testId }) => {
           </button>
         </PopoverTrigger>
         <PopoverContent className="date-popover w-auto p-0" align="start" data-testid={`${testId}-calendar`}>
-          <Calendar mode="single" locale={tr} weekStartsOn={1} selected={selected} defaultMonth={selected} disabled={disabled}
+          <Calendar mode="single" locale={tr} weekStartsOn={1} selected={selected} defaultMonth={selected || (min ? parseISO(min) : undefined)} disabled={disabled}
             onSelect={(d) => { if (d) { onChange(format(d, "yyyy-MM-dd")); setOpen(false); } }} initialFocus />
         </PopoverContent>
       </Popover>

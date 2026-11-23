@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 13: tested conflict warnings, the pay slip PDF, leave requests through the personal link (public page, approve and reject), and order delivery syncing to expenses and stock. The new backend pytest file passes 20/20. Regression files for iterations 9-12 pass 58/59. The one failure is test-design flakiness and passes when run serially. Every UI flow worked, with 1 integration bug: after you toggle or delete an order in Sipariş geçmişi, Stok Sayımı and the expense list keep showing the old numbers until the page is reloaded. Found 1 backend bug: the pay slip returns 500 when a name, task or advance note contains '<' followed by a letter. No email or cron endpoint was called.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/payroll/{staff_id}/slip", "issue": "Returns 500 (reportlab ValueError 'Parse error: saw </para> instead of expected </i>') when the staff name, task or an advance note contains markup-like text such as 'A <i>x' or 'a <b c'. In exports.build_payslip_pdf, Paragraph(str(c)) and the header f-string are not escaped. Fix: wrap every user value in xml.sax.saxutils.escape(). Text like '&' or '<3' renders fine. The same risk likely applies to build_pdf if it uses Paragraph with user text."},
+      {"endpoint": "PUT /api/orders/{id} (revert delivery)", "issue": "Reverting a delivery removes the stock and the expense, but inventory.unit_cost stays at the order price (28) instead of going back to the old value (20). This matches how deleting expenses already behaves, but the confirm text says the delivery is undone."},
+      {"endpoint": "PUT /api/orders/{id}", "issue": "If items or quantities on an order that is already delivered are edited, the linked expense and stock are not re-synced. The expense_id is kept as is. The UI cannot edit items, so this can only happen through the API."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Order history toggle and delete (Tedarikçiler > Sipariş geçmişi)", "issue": "OrderHistory.toggle and remove only re-fetch /api/orders through the component's own load(). They never call the dashboard load(). Stok Sayımı, Alış & Giderler and Tedarikçi harcamaları keep stale data: after the delivery, Stok Sayımı still showed 2 kg while the backend had 12 kg. The correct 12 kg appeared only after a page reload. Fix: pass onReload={load} from App.js to <OrderHistory> and await it after the PUT or DELETE.", "affected_selectors": ["order-history-status-{i}", "order-history-delete-{i}", "inventory-row-{i}"]}
+    ],
+    "design_issues": [
+      {"screen": "Public /izin/{token}", "issues": ["The Başlangıç calendar has no min date, so dates far in the past can be picked. The user only finds out on submit (backend 422). Consider disabling days older than today-7.", "The end date picker opens on the current month instead of the selected start month."]},
+      {"screen": "Shift modal conflict check", "issues": ["Overlap is checked only for shifts on the same date. A shift that starts the previous night and runs past midnight (e.g. 26th 22:00-06:00) is not compared with a 05:00 shift on the 27th. Editing any shift on a leave day shows the confirm again every time, which is acceptable but noisy."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration13_leave_requests_payslip_delivery.py", "/app/test_reports/pytest/pytest_iter13.xml"],
+  "action_items": [
+    "Pass onReload to OrderHistory and call it after toggling or deleting an order, so stock and expense changes show without a page reload.",
+    "Escape user text (name, task, advance note) with xml.sax.saxutils.escape in build_payslip_pdf, and check build_pdf for the same problem.",
+    "Optional: restore the previous unit_cost when a delivery is reverted, or say in the confirm text that the price stays.",
+    "Optional: set a min date on the public start date picker (today-7)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 793 lines, over the 700-line guideline. Split leave requests and payroll and orders into separate routers.",
+    "make_crud keeps growing per-collection special cases (orders, staff, sales, expenses, inventory). Use per-collection hooks instead.",
+    "The /api/staff and /api/dashboard responses expose every staff request_token without any auth, so anyone with the dashboard URL can impersonate staff on /izin. This is acceptable for a no-login manager app, but worth knowing.",
+    "test_iteration10 copy-week and test_iteration11 both use 2031-03 dates, so they can collide under xdist -n 2 (copy-week source_count 4 instead of 3). This is flaky and passes serially."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration13_leave_requests_payslip_delivery.py (new)"],
+  "success_rate": {"backend": "100% of the requested features. 1 minor 500 on a markup edge case in the pay slip.", "frontend": "~95% (1 stale-data integration issue)"},
+  "flaky_tests": ["tests/test_iteration10_wage_copyweek_prices.py::TestCopyWeek::test_copy_dup_deleted: failed in 1 of 2 runs when run in parallel with iteration 11 (shared 2031-03 dates). Passes with -n 0."],
+  "seed_data_creation": "Through the API and UI I created TEST_ staff (Şükrü Öğüt with tag, TEST_UI_Zeynep, plus temporary pay slip staff), TEST_ inventory (TEST_Dom, TEST_UI_Biber), TEST_ orders and leave requests. I deleted all of them by id; deleting staff also removed their shifts, leaves, advances and leave_requests. I also deleted the stock_movements and price_alerts that my runs created (TEST_ inventory names, created after 15:34 UTC). Left untouched because the main agent created them before my run: staff 'Ayşe Çelik' (9c9d13c0...) with 1 shift, 3 leaves and 2 leave_requests (one still pending, Mazeret 26-27 Nov), inventory 'Domates', order 'Manav Veli', and their 3 stock_movements. cron_runs is empty and report_deliveries was kept. I did not clear whole collections without a filter, so the main agent must delete its own records by id.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Today is 2026-11-23 (Mon). Public page: an invalid token shows leave-request-error 'Geçersiz veya süresi dolmuş link'. Calendar day selector: '[data-testid=X-calendar] button[name=day]:not([disabled]):not(.day-outside)' filtered by exact text. Approving a 2-day Yıllık izin request moved the balance from 14 to 12 and showed the toast 'Onaylandı · 2 gün takvime eklendi'. Rejecting shows Reddedildi under Son kararlar. Confirm dialog texts were verified for: a shift on a leave day, an overlap (including overnight 22-06 vs 23-01), adjacent shifts (no warning), and a leave on a day with shifts. Dismissing keeps the modal open and saves nothing. The order delivery backend is correct (2->12->2 kg, a 280 expense in 'Sipariş teslimi', delete reverts it). Only the UI refresh is stale. The pay slip download works from the payroll-slip-{i} button."
+}

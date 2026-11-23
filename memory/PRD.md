@@ -112,3 +112,11 @@
 - Bulk WhatsApp plan dialog (sequential per-person send).
 - Order history (orders collection) auto-saved from order list copy/WhatsApp; status toggle.
 - Tested iteration_12.json: all passed; UI nits fixed.
+
+## Iteration 13 (Haziran 2026)
+- Conflict warnings (shift on leave day / overlapping shifts / leave on shift day) via confirm.
+- Pay slip PDF per staff (/api/payroll/{id}/slip).
+- Personal leave request link (/izin/{token}, public API /api/public/leave/{token}), manager approve/reject panel, pending chips in calendar.
+- Order delivered -> auto expense 'Sipariş teslimi' + stock add; revert removes.
+- Tested iteration_13.json; fixed stale data after order toggle, PDF escaping, date picker min.
+- Backlog: split server.py (~800 lines) into routers.

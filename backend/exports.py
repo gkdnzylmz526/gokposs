@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -112,7 +113,7 @@ def build_pdf(report: dict) -> bytes:
     for name, headers, rows in _sections(report):
         story.append(Paragraph(name, h2))
         kalem = headers == ["Kalem", "Tutar"]
-        body = [[Paragraph(_fmt(h, v, not (kalem and "adedi" in str(r[0]))), cell) for h, v in zip(headers, r)] for r in rows]
+        body = [[Paragraph(escape(_fmt(h, v, not (kalem and "adedi" in str(r[0])))), cell) for h, v in zip(headers, r)] for r in rows]
         if not body:
             body = [[Paragraph("Kayıt yok", cell)] + [""] * (len(headers) - 1)]
         table = Table([[Paragraph(f"<b>{h}</b>", cell) for h in headers]] + body, repeatRows=1,
@@ -191,7 +192,7 @@ def build_payslip_pdf(row: dict, data: dict) -> bytes:
     months = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
     def table(rows, widths, bold_last=False):
-        t = Table([[Paragraph(str(c), cell) for c in r] for r in rows], colWidths=widths)
+        t = Table([[Paragraph(escape(str(c)), cell) for c in r] for r in rows], colWidths=widths)
         style = [("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#E5E7EB")), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5), ("ALIGN", (-1, 0), (-1, -1), "RIGHT")]
         if bold_last:
             style += [("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#FEF3C7")), ("FONTNAME", (0, -1), (-1, -1), "Sans-Bold")]
@@ -199,7 +200,7 @@ def build_payslip_pdf(row: dict, data: dict) -> bytes:
         return t
 
     w = doc.width
-    story = [Paragraph("GÖKBOSS POS — Ücret Bordrosu", title), Paragraph(f"{months[month.month - 1]} {month.year} · {row['name']}{' · ' + row['task'] if row.get('task') else ''}", sub)]
+    story = [Paragraph("GÖKBOSS POS — Ücret Bordrosu", title), Paragraph(escape(f"{months[month.month - 1]} {month.year} · {row['name']}{' · ' + row['task'] if row.get('task') else ''}"), sub)]
     story += [Paragraph("Çalışma özeti", h2), table([
         ["Vardiya sayısı", row["shift_count"]], ["Normal çalışma", f"{row['regular_hours']:g} saat"], ["Fazla mesai", f"{row['overtime_hours']:g} saat"],
         ["İzin günü", row["leave_days"]], ["Saatlik ücret", tl(row["hourly_wage"])]], [w * 0.65, w * 0.35])]
