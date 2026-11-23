@@ -126,3 +126,44 @@ def build_pdf(report: dict) -> bytes:
         story.append(table)
     doc.build(story)
     return buf.getvalue()
+
+
+def build_payroll_excel(data: dict) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Maaş Özeti"
+    ws.append([f"GÖKBOSS POS — {data['month']} Maaş Raporu"])
+    ws["A1"].font = Font(size=14, bold=True)
+    ws.append([f"Haftalık {data['weekly_limit']} saati aşan çalışma fazla mesai sayılır (x{data['overtime_rate']})"])
+    ws.append([])
+    headers = ["Personel", "Görev", "Saatlik ücret", "Vardiya", "Normal saat", "Fazla mesai saati", "Normal ücret", "Fazla mesai ücreti", "Toplam"]
+    ws.append(headers)
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1F2937")
+    money_cols = {3, 7, 8, 9}
+    for r in data["rows"]:
+        ws.append([r["name"], r["task"], r["hourly_wage"], r["shift_count"], r["regular_hours"], r["overtime_hours"], r["regular_pay"], r["overtime_pay"], r["total_pay"]])
+        for c in money_cols:
+            ws.cell(ws.max_row, c).number_format = '#,##0.00 "₺"'
+    t = data["totals"]
+    ws.append(["TOPLAM", "", "", "", t["regular_hours"], t["overtime_hours"], t["regular_pay"], t["overtime_pay"], t["total_pay"]])
+    for c in range(1, 10):
+        ws.cell(ws.max_row, c).font = Font(bold=True)
+    for c in money_cols:
+        ws.cell(ws.max_row, c).number_format = '#,##0.00 "₺"'
+    for col, width in zip(range(1, 10), [22, 16, 14, 10, 13, 17, 15, 18, 15]):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    detail = wb.create_sheet("Vardiya Detayı")
+    detail.append(["Personel", "Tarih", "Başlangıç", "Bitiş", "Saat", "Fazla mesai saati", "Görev"])
+    for cell in detail[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1F2937")
+    for r in data["rows"]:
+        for sh in r["shifts"]:
+            detail.append([r["name"], datetime.fromisoformat(sh["date"]).strftime("%d.%m.%Y"), sh["start"], sh["end"], sh["hours"], sh["overtime"], sh.get("task", "")])
+    for col, width in zip(range(1, 8), [22, 13, 11, 11, 9, 17, 18]):
+        detail.column_dimensions[get_column_letter(col)].width = width
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

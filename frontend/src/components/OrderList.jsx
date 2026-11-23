@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Copy, MessageCircle, ShoppingCart } from "lucide-react";
+import { waPhone } from "@/lib/phone";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const num = (n) => Number(Number(n || 0).toFixed(3)).toLocaleString("tr-TR");
@@ -14,8 +15,6 @@ const orderText = (group) => [
   "Teşekkürler.",
 ].join("\n");
 
-const waPhone = (phone) => { const d = (phone || "").replace(/\D/g, ""); if (!d) return ""; if (d.startsWith("90")) return d; if (d.startsWith("0")) return `9${d}`; return d.length === 10 ? `90${d}` : d; };
-
 const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast.success("Sipariş listesi kopyalandı"); } catch { toast.error("Kopyalanamadı"); } };
 
 export const OrderList = ({ refreshKey }) => {
@@ -25,7 +24,7 @@ export const OrderList = ({ refreshKey }) => {
   return (
     <section className="panel order-panel" data-testid="order-list">
       <div className="panel-head">
-        <div><h3>Otomatik sipariş listesi</h3><span className="muted">Kritik seviyedeki malzemeler · önerilen miktar = hedef seviye − mevcut (hedef yoksa minimumun 2 katı)</span></div>
+        <div><h3>Otomatik sipariş listesi</h3><span className="muted">Kritik seviyedeki malzemeler, alış geçmişine göre en ucuz tedarikçiye gruplanır · önerilen miktar = hedef seviye − mevcut (hedef yoksa minimumun 2 katı)</span></div>
         <ShoppingCart size={20} className="panel-icon" />
       </div>
       {!groups.length && <div className="empty-state">Sipariş gereken malzeme yok. Tüm stoklar minimumun üzerinde.</div>}
@@ -35,7 +34,7 @@ export const OrderList = ({ refreshKey }) => {
             <div className="order-group-head"><b>{g.supplier}{g.phone && <small data-testid={`order-phone-${gi}`}>{g.phone}</small>}</b><span>{money(g.estimated_total)}</span></div>
             {g.items.map((i, ii) => (
               <div className="order-item" key={i.inventory_id} data-testid={`order-item-${gi}-${ii}`}>
-                <span>{i.name}<small>Mevcut {num(i.quantity)} / min {num(i.minimum)} {i.unit}</small></span>
+                <span>{i.name}<small>Mevcut {num(i.quantity)} / min {num(i.minimum)} {i.unit}{i.unit_price ? ` · ${money(i.unit_price)}/${i.unit}` : ""}</small>{i.cheapest && <small className="cheapest-note" data-testid={`order-cheapest-${gi}-${ii}`}>En ucuz tedarikçi{i.assigned_supplier && i.assigned_supplier !== g.supplier ? ` · kayıtlı: ${i.assigned_supplier}` : ""}{i.saving > 0 ? ` · ${money(i.saving)} tasarruf` : ""}</small>}</span>
                 <strong>{num(i.suggested)} {i.unit}{i.estimated_cost > 0 && <small>{money(i.estimated_cost)}</small>}</strong>
               </div>
             ))}

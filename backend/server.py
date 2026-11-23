@@ -18,7 +18,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
-from exports import build_excel, build_pdf
+from exports import build_excel, build_pdf, build_payroll_excel
 from mailer import send_report_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -89,6 +89,7 @@ class StaffEntry(Entry):
     task: str = ""
     status: str = "Bekliyor"
     hourly_wage: float = 0
+    phone: str = ""
 
 class CashEntry(Entry):
     opening: float = 0
@@ -343,10 +344,17 @@ async def order_list():
         amount = suggested_amount(item)
         if not amount:
             continue
-        supplier = item.get("supplier") or "Tedarikçi belirtilmemiş"
-        group = groups.setdefault(supplier, {"supplier": supplier, "phone": phones.get(_tr_key(item.get("supplier", "")), ""), "items": [], "estimated_total": 0})
-        cost = round(amount * float(item.get("unit_cost", 0)), 2)
-        group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost})
+        comparison = (await price_data(item))["comparison"]
+        cheapest = next((c for c in comparison if c["supplier"] != "Tedarikçi belirtilmemiş"), None)
+        assigned = item.get("supplier", "")
+        supplier = (cheapest or {}).get("supplier") or assigned or "Tedarikçi belirtilmemiş"
+        price = (cheapest or {}).get("last_price") or float(item.get("unit_cost", 0))
+        assigned_price = next((c["last_price"] for c in comparison if c["supplier"] == assigned), None)
+        group = groups.setdefault(supplier, {"supplier": supplier, "phone": phones.get(_tr_key(supplier), ""), "items": [], "estimated_total": 0})
+        cost = round(amount * price, 2)
+        group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost,
+                               "unit_price": price, "assigned_supplier": assigned, "cheapest": bool(cheapest) and len(comparison) > 1,
+                               "saving": round((assigned_price - price) * amount, 2) if cheapest and assigned_price and assigned != supplier else 0})
         group["estimated_total"] = round(group["estimated_total"] + cost, 2)
     return sorted(groups.values(), key=lambda g: g["supplier"])
 
@@ -463,15 +471,11 @@ async def copy_week(req: CopyWeekRequest):
         created += 1
     return {"created": created, "source_count": len(source)}
 
-@api.get("/inventory/{item_id}/prices")
-async def ingredient_prices(item_id: str):
-    item = await db.inventory.find_one({"id": item_id}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Malzeme bulunamadı")
+async def price_data(item: Dict[str, Any]) -> Dict[str, Any]:
     history = []
-    async for exp in db.expenses.find({"purchases.inventory_id": item_id}, {"_id": 0}).sort("created_at", 1):
+    async for exp in db.expenses.find({"purchases.inventory_id": item["id"]}, {"_id": 0}).sort("created_at", 1):
         for p in exp.get("purchases", []):
-            if p["inventory_id"] == item_id and float(p.get("unit_price", 0)) > 0:
+            if p["inventory_id"] == item["id"] and float(p.get("unit_price", 0)) > 0:
                 history.append({"date": exp["created_at"], "unit_price": float(p["unit_price"]), "quantity": float(p["quantity"]),
                                 "supplier": exp.get("supplier") or item.get("supplier") or "Tedarikçi belirtilmemiş"})
     suppliers: Dict[str, Dict[str, Any]] = {}
@@ -483,7 +487,66 @@ async def ingredient_prices(item_id: str):
     comparison = [{"supplier": r["supplier"], "last_price": r["last_price"], "last_date": r["last_date"], "min_price": min(r["prices"]), "avg_price": round(sum(r["prices"]) / len(r["prices"]), 2),
                    "purchases": len(r["prices"]), "quantity": round(r["quantity"], 3)} for r in suppliers.values()]
     comparison.sort(key=lambda r: r["last_price"])
-    return {"item": {"id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "unit_cost": item.get("unit_cost", 0)}, "history": history, "comparison": comparison}
+    return {"history": history, "comparison": comparison}
+
+@api.get("/inventory/{item_id}/prices")
+async def ingredient_prices(item_id: str):
+    item = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Malzeme bulunamadı")
+    return {"item": {"id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "unit_cost": item.get("unit_cost", 0)}, **await price_data(item)}
+
+WEEKLY_LIMIT, OVERTIME_RATE = 45, 1.5
+
+def shift_hours(shift: Dict[str, Any]) -> float:
+    sh, sm = map(int, shift["start"].split(":"))
+    eh, em = map(int, shift["end"].split(":"))
+    minutes = eh * 60 + em - (sh * 60 + sm)
+    return (minutes + 1440 if minutes < 0 else minutes) / 60
+
+def split_overtime(shifts: List[Dict[str, Any]]) -> Dict[str, tuple]:
+    """Per shift id -> (regular, overtime), hours beyond WEEKLY_LIMIT in each Mon–Sun week are overtime."""
+    result, weeks = {}, {}
+    for s in sorted(shifts, key=lambda x: (x["date"], x["start"])):
+        d = date_cls.fromisoformat(s["date"])
+        key = (s["staff_id"], (d - timedelta(days=d.weekday())).isoformat())
+        used = weeks.get(key, 0)
+        h = shift_hours(s)
+        regular = max(0, min(h, WEEKLY_LIMIT - used))
+        result[s["id"]] = (regular, h - regular)
+        weeks[key] = used + h
+    return result
+
+async def build_payroll(month: str) -> Dict[str, Any]:
+    first = date_cls.fromisoformat(f"{month}-01")
+    nxt = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    span_start, span_end = first - timedelta(days=first.weekday()), nxt + timedelta(days=6)
+    shifts = await db.shifts.find({"date": {"$gte": span_start.isoformat(), "$lt": span_end.isoformat()}}, {"_id": 0}).to_list(None)
+    split = split_overtime(shifts)
+    rows = []
+    for person in await list_items("staff", limit=None):
+        wage = float(person.get("hourly_wage", 0))
+        mine = [s for s in shifts if s["staff_id"] == person["id"] and first.isoformat() <= s["date"] < nxt.isoformat()]
+        regular = sum(split[s["id"]][0] for s in mine)
+        overtime = sum(split[s["id"]][1] for s in mine)
+        rows.append({"staff_id": person["id"], "name": person["name"], "task": person.get("task", ""), "hourly_wage": wage, "shift_count": len(mine),
+                     "regular_hours": round(regular, 2), "overtime_hours": round(overtime, 2), "regular_pay": round(regular * wage, 2),
+                     "overtime_pay": round(overtime * wage * OVERTIME_RATE, 2), "total_pay": round(regular * wage + overtime * wage * OVERTIME_RATE, 2),
+                     "shifts": sorted([{**s, "hours": round(shift_hours(s), 2), "overtime": round(split[s["id"]][1], 2)} for s in mine], key=lambda x: (x["date"], x["start"]))})
+    totals = {k: round(sum(r[k] for r in rows), 2) for k in ("regular_hours", "overtime_hours", "regular_pay", "overtime_pay", "total_pay")}
+    return {"month": month, "weekly_limit": WEEKLY_LIMIT, "overtime_rate": OVERTIME_RATE, "rows": rows, "totals": totals}
+
+MONTH = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+
+@api.get("/payroll")
+async def payroll(month: str | None = MONTH):
+    return await build_payroll(month or datetime.now(TZ).strftime("%Y-%m"))
+
+@api.get("/payroll/export")
+async def payroll_export(month: str | None = MONTH):
+    data = await build_payroll(month or datetime.now(TZ).strftime("%Y-%m"))
+    return Response(build_payroll_excel(data), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="gokboss-pos-maas-{data["month"]}.xlsx"'})
 
 def _purchase_total(doc: Dict[str, Any]) -> None:
     if doc.get("purchases") and not float(doc.get("amount", 0)):

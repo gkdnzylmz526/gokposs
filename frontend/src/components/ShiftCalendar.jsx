@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { addDays, format, parseISO, startOfWeek } from "date-fns";
 import { tr } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Copy, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, MessageCircle, Plus, X } from "lucide-react";
+import { waLink } from "@/lib/phone";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -17,7 +18,9 @@ export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete, onReload
   const today = format(new Date(), "yyyy-MM-dd");
   const byCell = useMemo(() => shifts.reduce((all, s) => ({ ...all, [`${s.staff_id}|${s.date}`]: [...(all[`${s.staff_id}|${s.date}`] || []), s] }), {}), [shifts]);
   const weekHours = (person) => days.reduce((sum, d) => sum + (byCell[`${person.id}|${format(d, "yyyy-MM-dd")}`] || []).reduce((t, s) => t + hours(s), 0), 0);
-  const payroll = staff.reduce((sum, p) => sum + weekHours(p) * Number(p.hourly_wage || 0), 0);
+  const weekPay = (p) => { const h = weekHours(p), w = Number(p.hourly_wage || 0), ot = Math.max(0, h - 45); return { hours: h, overtime: ot, pay: (h - ot) * w + ot * w * 1.5 }; };
+  const payroll = staff.reduce((sum, p) => sum + weekPay(p).pay, 0);
+  const planText = (person) => [`Merhaba ${person.name}, ${format(days[0], "d MMMM", { locale: tr })} – ${format(days[6], "d MMMM", { locale: tr })} vardiya planın:`, ...days.map((d) => { const list = byCell[`${person.id}|${format(d, "yyyy-MM-dd")}`] || []; return `${format(d, "EEEE dd.MM", { locale: tr })}: ${list.length ? list.map((s) => `${s.start}–${s.end}${s.task ? ` (${s.task})` : ""}`).join(", ") : "İzin"}`; }), `Toplam: ${Number(weekHours(person).toFixed(1)).toLocaleString("tr-TR")} saat`, "GÖKBOSS POS"].join("\n");
   const totalHours = staff.reduce((sum, p) => sum + weekHours(p), 0);
   const copyLastWeek = async () => {
     const from = format(addDays(weekStart, -7), "yyyy-MM-dd"), to = format(weekStart, "yyyy-MM-dd");
@@ -45,7 +48,7 @@ export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete, onReload
             {staff.map((person) => {
               const total = weekHours(person);
               return [
-                <div key={person.id} className="shift-person" data-testid={`shift-person-${person.id}`}><b>{person.name}</b><small>{person.task || "—"} · {Number(total.toFixed(1)).toLocaleString("tr-TR")} saat</small><small className="pay" data-testid={`shift-pay-${person.id}`}>{person.hourly_wage ? `${money(total * person.hourly_wage)} (${money(person.hourly_wage)}/saat)` : "Saatlik ücret girilmemiş"}</small></div>,
+                <div key={person.id} className="shift-person" data-testid={`shift-person-${person.id}`}><b>{person.name}</b><small>{person.task || "—"} · {Number(total.toFixed(1)).toLocaleString("tr-TR")} saat</small><small className="pay" data-testid={`shift-pay-${person.id}`}>{person.hourly_wage ? `${money(weekPay(person).pay)} (${money(person.hourly_wage)}/saat)` : "Saatlik ücret girilmemiş"}</small>{weekPay(person).overtime > 0 && <small className="ot-text" data-testid={`shift-overtime-${person.id}`}>Fazla mesai: {Number(weekPay(person).overtime.toFixed(1)).toLocaleString("tr-TR")} saat{person.hourly_wage ? ` · ${money(weekPay(person).overtime * person.hourly_wage * 1.5)}` : ""}</small>}<a className={`wa-mini ${person.phone ? "" : "disabled"}`} data-testid={`shift-whatsapp-${person.id}`} href={person.phone ? waLink(person.phone, planText(person)) : undefined} target="_blank" rel="noreferrer" title={person.phone ? "Haftalık planı WhatsApp'ta gönder" : "Telefon numarası girilmemiş"}><MessageCircle size={12} /> {person.phone ? "Planı gönder" : "Telefon yok"}</a></div>,
                 ...days.map((d) => {
                   const date = format(d, "yyyy-MM-dd");
                   const cell = byCell[`${person.id}|${date}`] || [];
