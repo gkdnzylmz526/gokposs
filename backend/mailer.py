@@ -86,3 +86,15 @@ def send_leave_request_email(staff_name: str, doc: dict) -> None:
         f"Merhaba,\n\n{staff_name} yeni bir izin talebi gönderdi.\n\nTarih: {period} ({doc['days']} gün)\nTür: {doc['type']}\n"
         f"Not: {doc.get('note') or '—'}\n\nOnaylamak veya reddetmek için GÖKBOSS POS > Ekip & Vardiya > İzin talepleri bölümüne gidin.\n\nGÖKBOSS POS",
     )
+
+
+def send_cash_reminder_email(rec: dict) -> None:
+    y, m, d = rec["date"].split("-")
+    pays = rec.get("payments", {})
+    _send(
+        f"GÖKBOSS POS — Kasa kapanışı girilmedi ({d}.{m}.{y})",
+        f"Merhaba,\n\nBugün için kasa kapanışı henüz girilmedi.\n\n"
+        f"Bugünkü satış: {tl(rec['sales'])} (nakit {tl(pays.get('Nakit'))} · kart {tl(pays.get('Kart'))} · yemek kartı {tl(pays.get('Yemek kartı'))})\n"
+        f"Bugünkü gider: {tl(rec['expenses'])}\nBeklenen kasa (nakit): {tl(rec['expected_closing'])}\n\n"
+        "Lütfen GÖKBOSS POS > Kasa bölümünden açılış ve kapanış tutarlarını girin.\n\nGÖKBOSS POS",
+    )

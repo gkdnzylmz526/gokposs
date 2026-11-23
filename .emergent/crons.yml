@@ -23,3 +23,11 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: cash-reminder
+    description: "Emails a reminder at 23:30 Istanbul time if today's cash closing has not been entered"
+    cron: "30 23 * * *"
+    timezone: "Europe/Istanbul"
+    endpoint: "{{BASE_URL}}/api/cron/cash-reminder"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

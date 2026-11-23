@@ -20,7 +20,7 @@ from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
 from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
-from mailer import send_leave_request_email, send_monthly_email, send_report_email, send_weekly_email
+from mailer import send_cash_reminder_email, send_leave_request_email, send_monthly_email, send_report_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -129,8 +129,10 @@ class SalesEntry(Entry):
     unit_price: float = 0
     unit_cost: float = 0
     channel: str = "Salon"
+    payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Yemek kartı)$")
     amount: float = 0
     note: str = ""
+    created_by: str = ""
     stock_moves: List[Dict[str, Any]] = []
 
 class PurchaseItem(BaseModel):
@@ -233,7 +235,16 @@ class ProductEntry(Entry):
     cost_from_recipe: bool = False
     target_margin: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry}
+class WasteEntry(Entry):
+    inventory_name: str = Field(min_length=1)
+    quantity: float = Field(gt=0)
+    reason: str = "Bozuldu"
+    note: str = ""
+    inventory_id: str = ""
+    unit: str = ""
+    cost: float = 0
+
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry, "waste": WasteEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -303,7 +314,8 @@ async def build_report(period: str, start: str | None = None, end: str | None = 
         row["cost"] += quantity * float(item.get("unit_cost", 0))
         row["profit"] = row["revenue"] - row["cost"]
     revenue, spent = _total(sales), _total(expenses)
-    return {"period": period, "start": begin.isoformat(), "end": (finish - timedelta(seconds=1)).isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales),
+    waste = await db.waste.find({"created_at": {"$gte": since, "$lt": until}}, {"_id": 0}).to_list(None)
+    return {"payments": payment_breakdown(sales), "waste_cost": round(sum(float(w.get("cost", 0)) for w in waste), 2), "waste_count": len(waste), "period": period, "start": begin.isoformat(), "end": (finish - timedelta(seconds=1)).isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales),
             "top_products": sorted(products.values(), key=lambda row: row["quantity"], reverse=True), "sales": sales, "expenses_list": expenses}
 
 async def full_report(period: str, start: str | None = None, end: str | None = None) -> Dict[str, Any]:
@@ -431,10 +443,41 @@ class CountIn(BaseModel):
     quantity: float = Field(ge=0)
 
 @api.get("/staff-view")
-async def staff_view():
+async def staff_view(request: Request):
+    member = getattr(request.state, "member", {})
+    today_start = _day_start(datetime.now(TZ).date()).astimezone(timezone.utc).isoformat()
+    mine: Dict[str, float] = {}
+    for sale in await db.sales.find({"created_by": member.get("email", "-"), "created_at": {"$gte": today_start}}, {"_id": 0}).to_list(None):
+        mine[sale["product_name"]] = mine.get(sale["product_name"], 0) + float(sale["quantity"])
+    my_today = sorted(({"product_name": k, "quantity": v} for k, v in mine.items()), key=lambda r: -r["quantity"])
     products = [{k: p.get(k) for k in ("id", "name", "category", "price", "active")} for p in await list_items("products", limit=None)]
     inventory = [{k: i.get(k) for k in ("id", "name", "quantity", "unit", "minimum")} for i in await list_items("inventory", limit=None)]
-    return {"products": products, "inventory": inventory}
+    return {"products": products, "inventory": inventory, "my_today": my_today}
+
+@api.get("/public/menu")
+async def public_menu():
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for p in sorted(await list_items("products", limit=None), key=lambda x: x["name"]):
+        if p.get("active", True):
+            groups.setdefault(p.get("category") or "Menü", []).append({"name": p["name"], "price": p.get("price", 0)})
+    return {"name": "GÖKBOSS", "categories": [{"category": k, "items": v} for k, v in sorted(groups.items())]}
+
+async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
+    rec = await cash_reconciliation()
+    if rec["has_closing"]:
+        return None
+    async def job(day):
+        await asyncio.to_thread(send_cash_reminder_email, rec)
+    return await _deliver("cash_reminder", trigger, key, job)
+
+@api.post("/cron/cash-reminder")
+async def cron_cash_reminder(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    run_id = await accept_cron(request)
+    if not run_id:
+        return {"status": "duplicate"}
+    background.add_task(send_cash_reminder, "cron", run_id)
+    return {"status": "accepted"}
 
 @api.post("/inventory/{item_id}/count")
 async def count_inventory(item_id: str, body: CountIn, request: Request):
@@ -486,8 +529,25 @@ async def cash_reconciliation(date: str | None = None):
     opening = float(cash_logs[-1].get("opening", 0)) if cash_logs else 0
     actual = float(cash_logs[0].get("closing", 0)) if cash_logs else 0
     sales_total, expenses_total = _total(sales), _total(expenses)
-    expected = opening + sales_total - expenses_total
-    return {"date": target, "opening": opening, "sales": sales_total, "expenses": expenses_total, "expected_closing": expected, "actual_closing": actual, "difference": actual - expected, "has_closing": bool(cash_logs)}
+    payments = payment_breakdown(sales)
+    expected = opening + payments["Nakit"] - expenses_total
+    return {"date": target, "opening": opening, "sales": sales_total, "cash_sales": payments["Nakit"], "payments": payments, "expenses": expenses_total, "expected_closing": expected, "actual_closing": actual, "difference": actual - expected, "has_closing": bool(cash_logs)}
+
+PAYMENTS = ("Nakit", "Kart", "Yemek kartı")
+
+def payment_breakdown(sales: List[Dict[str, Any]]) -> Dict[str, float]:
+    return {p: round(sum(float(x.get("amount", 0)) for x in sales if x.get("payment", "Nakit") == p), 2) for p in PAYMENTS}
+
+async def apply_waste(doc: Dict[str, Any], sign: int, reason: str) -> None:
+    item = await db.inventory.find_one({"id": doc["inventory_id"]}, {"_id": 0}) if doc.get("inventory_id") else None
+    if not item:
+        key = _tr_key(doc["inventory_name"])
+        item = next((i for i in await list_items("inventory", limit=None) if _tr_key(i["name"]) == key), None)
+    if not item:
+        raise HTTPException(status_code=422, detail="Stokta bu isimde malzeme yok")
+    if sign > 0:
+        doc.update(inventory_id=item["id"], inventory_name=item["name"], unit=item.get("unit", ""), cost=round(float(doc["quantity"]) * float(item.get("unit_cost", 0)), 2))
+    await apply_moves([{"inventory_id": item["id"], "delta": -float(doc["quantity"])}], sign, {"id": doc["id"], "product_name": ""}, reason)
 
 def _tr_key(value: str) -> str:
     return (value or "").replace("I", "ı").replace("İ", "i").lower().strip()
@@ -885,7 +945,10 @@ def make_crud(name: str, model: type[BaseModel]):
             if not product:
                 raise HTTPException(status_code=422, detail="Menü ürünü seçin")
             doc.update(product_name=product["name"], unit_price=float(product["price"]), unit_cost=float(product.get("cost", 0)), amount=round(float(doc["quantity"]) * float(product["price"]), 2))
+        if name == "waste":
+            await apply_waste(doc, 1, f"Fire · {doc['reason']}")
         if name == "sales":
+            doc["created_by"] = getattr(request.state, "member", {}).get("email", "")
             await fill_sale_cost(doc)
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış")
@@ -916,6 +979,12 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_purchases(doc, 1, f"Alış düzeltildi · {doc['category']}")
         if name == "staff":
             doc["request_token"] = old.get("request_token") or doc["request_token"]
+        if name == "sales":
+            doc["created_by"] = old.get("created_by", "")
+        if name == "waste":
+            await apply_waste(old, -1, "Fire düzeltildi (eski kayıt geri alındı)")
+            doc["inventory_id"] = ""
+            await apply_waste(doc, 1, f"Fire düzeltildi · {doc['reason']}")
         if name == "orders":
             await sync_order_delivery(old, doc)
         if name == "sales":
@@ -939,6 +1008,8 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         if name == "expenses" and old.get("purchases"):
             await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
+        if name == "waste":
+            await apply_waste(old, -1, "Fire silindi (stok iade)")
         if name == "orders" and old.get("expense_id"):
             await remove_expense(old["expense_id"])
         if name == "staff":

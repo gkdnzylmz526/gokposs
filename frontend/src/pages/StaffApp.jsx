@@ -6,22 +6,24 @@ import { Boxes, Minus, Plus, ReceiptText, Save } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-function SalesEntry({ products, onSaved }) {
+function SalesEntry({ products, myToday, onSaved }) {
   const [cart, setCart] = useState({});
   const [channel, setChannel] = useState("Salon");
+  const [payment, setPayment] = useState("Nakit");
   const [saving, setSaving] = useState(false);
   const change = (id, d) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) + d) }));
   const items = Object.entries(cart).filter(([, q]) => q > 0);
   const submit = async () => {
     setSaving(true);
     try {
-      for (const [id, quantity] of items) { await axios.post(`${API}/sales`, { product_id: id, product_name: products.find((p) => p.id === id)?.name, quantity, channel }); setCart((c) => ({ ...c, [id]: 0 })); }
+      for (const [id, quantity] of items) { await axios.post(`${API}/sales`, { product_id: id, product_name: products.find((p) => p.id === id)?.name, quantity, channel, payment }); setCart((c) => ({ ...c, [id]: 0 })); }
       toast.success(`${items.length} satış kaydedildi`); onSaved();
     } catch (e) { const d = e.response?.data?.detail; toast.error(typeof d === "string" ? d : "Satış kaydedilemedi; kaydedilenler sepetten çıkarıldı"); onSaved(); } finally { setSaving(false); }
   };
   return (
     <section data-testid="staff-sales">
       <div className="staff-channels">{["Salon", "Paket", "Online"].map((c) => <button key={c} className={`report-tab ${channel === c ? "active" : ""}`} data-testid={`staff-channel-${c}`} onClick={() => setChannel(c)}>{c}</button>)}</div>
+      <div className="staff-channels">{["Nakit", "Kart", "Yemek kartı"].map((c) => <button key={c} className={`report-tab ${payment === c ? "active" : ""}`} data-testid={`staff-payment-${c}`} onClick={() => setPayment(c)}>{c}</button>)}</div>
       {!products.length && <div className="empty-state">Menüde ürün yok. Yöneticinizden ürün eklemesini isteyin.</div>}
       <div className="staff-products">
         {products.filter((p) => p.active !== false).map((p) => (
@@ -31,6 +33,7 @@ function SalesEntry({ products, onSaved }) {
           </div>
         ))}
       </div>
+      <div className="staff-today" data-testid="staff-today"><b>Bugün sattıklarım</b>{!myToday.length ? <small>Henüz satış yok.</small> : myToday.map((r) => <span key={r.product_name}>{r.product_name}<em>{Number(r.quantity).toLocaleString("tr-TR")} adet</em></span>)}{myToday.length > 0 && <span className="total">Toplam<em data-testid="staff-today-total">{myToday.reduce((s, r) => s + r.quantity, 0).toLocaleString("tr-TR")} adet</em></span>}</div>
       <button className="primary-button full staff-submit" data-testid="staff-sales-submit" disabled={!items.length || saving} onClick={submit}><ReceiptText size={17} /> {saving ? "Kaydediliyor…" : `Satışı kaydet (${items.reduce((s, [, q]) => s + q, 0)} adet)`}</button>
     </section>
   );
@@ -58,7 +61,7 @@ function StockCount({ inventory, onSaved }) {
 
 export default function StaffApp() {
   const [tab, setTab] = useState("sales");
-  const [data, setData] = useState({ products: [], inventory: [] });
+  const [data, setData] = useState({ products: [], inventory: [], my_today: [] });
   const load = () => axios.get(`${API}/staff-view`).then(({ data: d }) => setData(d)).catch(() => toast.error("Veriler yüklenemedi"));
   useEffect(() => { load(); }, []);
   return (
@@ -69,7 +72,7 @@ export default function StaffApp() {
         <button className={tab === "sales" ? "active" : ""} data-testid="staff-tab-sales" onClick={() => setTab("sales")}><ReceiptText size={16} /> Satış gir</button>
         <button className={tab === "stock" ? "active" : ""} data-testid="staff-tab-stock" onClick={() => setTab("stock")}><Boxes size={16} /> Stok sayımı</button>
       </nav>
-      <main className="staff-main">{tab === "sales" ? <SalesEntry products={data.products} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
+      <main className="staff-main">{tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
     </div>
   );
 }
