@@ -100,11 +100,11 @@ class TestPayroll:
         assert "spreadsheetml" in r.headers["content-type"]
         assert "gokboss-pos-maas-2031-06.xlsx" in r.headers.get("content-disposition", "")
         wb = load_workbook(io.BytesIO(r.content))
-        assert wb.sheetnames == ["Maaş Özeti", "Vardiya Detayı"]
+        assert wb.sheetnames[:2] == ["Maaş Özeti", "Vardiya Detayı"]  # iter12 adds "Avanslar"
         ws = wb["Maaş Özeti"]
         rows = [[c.value for c in row] for row in ws.iter_rows()]
         mine = next(x for x in rows if x[0] == f"TEST_OT_{TAG}")
-        assert mine[2:] == [100, 6, 45, 9, 4500, 1350, 5850]
+        assert mine[2:9] == [100, 6, 45, 9, 4500, 1350, 5850]
         assert any(x[0] == "TOPLAM" for x in rows)
         det = [[c.value for c in row] for row in wb["Vardiya Detayı"].iter_rows()]
         mydet = [x for x in det if x[0] == f"TEST_OT_{TAG}"]

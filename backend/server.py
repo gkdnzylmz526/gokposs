@@ -97,7 +97,7 @@ class OrderEntry(Entry):
     channel: str = "WhatsApp"
     items: List[OrderItem] = []
     estimated_total: float = 0
-    status: str = "Gönderildi"
+    status: str = Field(default="Gönderildi", pattern="^(Gönderildi|Teslim alındı)$")
 
 class SupplierEntry(Entry):
     name: str
@@ -570,7 +570,7 @@ async def build_payroll(month: str) -> Dict[str, Any]:
                      "overtime_pay": round(overtime * wage * OVERTIME_RATE, 2), "total_pay": round(regular * wage + overtime * wage * OVERTIME_RATE, 2),
                      "shifts": sorted([{**s, "hours": round(shift_hours(s), 2), "overtime": round(split[s["id"]][1], 2)} for s in mine], key=lambda x: (x["date"], x["start"]))})
         row = rows[-1]
-        row["leave_days"] = sum(1 for x in leaves if x["staff_id"] == person["id"])
+        row["leave_days"] = sum(1 for x in leaves if x["staff_id"] == person["id"] and x.get("type") != "Haftalık izin")
         row["advances"] = [a for a in advances if a["staff_id"] == person["id"]]
         row["advance_total"] = round(sum(float(a["amount"]) for a in row["advances"]), 2)
         row["net_pay"] = round(row["total_pay"] - row["advance_total"], 2)

@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 12: tested leave tracking, salary advances in payroll and Excel export, bulk WhatsApp plan send, and order history, plus regressions for shifts, copy week, overtime and price insights. The new backend pytest file passes 15/15. Together with the updated iteration 11 file, 30/30 pass. Every listed frontend flow passed when driven through the UI with Playwright. No email or cron endpoint was called.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST/PUT /api/orders", "issue": "status is a free string with no validation. Anything other than 'Gönderildi' or 'Teslim alındı' is accepted. Consider a pattern or Literal."},
+      {"endpoint": "POST /api/leaves, /api/advances", "issue": "staff_id is never checked against existing staff, and nothing stops two leaves for the same staff on the same date. The UI hides the leave button once a day has a leave, so a duplicate can only come through the API. Shifts can also be added on a leave day, with no warning."},
+      {"endpoint": "GET /api/payroll", "issue": "leave_days counts every leave type, including 'Haftalık izin' (the weekly day off). Confirm this is intended."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Advance modal", "issues": ["The Tarih field is a native <input type=date> (browser picker, mm/dd/yyyy under en-US) instead of the shadcn Calendar."]},
+      {"screen": "Shift calendar", "issues": ["The add-shift and add-leave icon buttons in each cell are very faint and only become clear on hover. This is worse on the striped purple background of leave cells."]},
+      {"screen": "Leave modal", "issues": ["The type select still offers an empty 'Seçin' option. Choosing it gives a generic 422 error toast instead of a clear message."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration12_leaves_advances_orders.py", "/app/backend/tests/test_iteration11_payroll_overtime_orderlist.py", "/app/test_reports/pytest/pytest_iter12.xml"],
+  "action_items": [
+    "Optional: restrict order status to the 2 allowed values.",
+    "Optional: check that staff_id exists for leaves and advances, and block duplicate leaves for the same staff and date.",
+    "Optional: switch the advance date field to the shadcn Calendar, and make the calendar cell add buttons easier to see.",
+    "Data cleanup that I did not do, because these records are not mine: staff 'Ayşe' (d0f6aab7…) with her shift on 2026-11-23, Yıllık izin on 2026-11-24 and 300₺ advance on 2026-11-20, plus the order 'Manav Veli'. The main agent created these before my run. Delete them by id if they are test data."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 680 lines and close to the 700-line limit. Consider splitting payroll, orders and pricing into separate modules.",
+    "make_crud now carries special cases for many collections (sales, expenses, inventory, staff). Consider per-collection hooks.",
+    "EntryModal inputs have no data-testid. Tests have to use '[data-testid=<key>-field] input'.",
+    "In ShiftCalendar, leaveBalance counts the current calendar year from new Date(), while the calendar may be showing a week in another year. This is fine, but worth knowing."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration12_leaves_advances_orders.py (new)", "/app/backend/tests/test_iteration11_payroll_overtime_orderlist.py (updated the export assertions for the new Avanslar sheet and Avans/Net/İzin columns)"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Through the API I created TEST_UI_Phone (wage 100, with phone), TEST_UI_NoPhone (wage 50), TEST_UI_Blank (made via the UI modal), supplier TEST_UI_Sup and low-stock inventory TEST_UI_Un. I deleted all of them by id, which also removed their shifts, leaves and advances. I also deleted the 2 UI orders, the copied shifts (including the 11-30 copy of Ayşe's shift, which my copy-week action created), and the stock_movements and price_alerts from my pytest runs (tags 55de95 and 0ca9d7). cron_runs is empty and report_deliveries was kept.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Today in the environment is 2026-11-23 (Monday). Verified: leave balance goes from 14 to 13 after adding a Yıllık izin, stays at 13 after a Raporlu, and returns to 14 when the Yıllık izin is edited to Mazeret. Chip edit and delete work, and the plan text shows the leave type. A blank annual_leave_days in the staff modal is saved as 14. Bulk dialog: the button reads 'Sıradakini gönder: X (0/1)', then 'Herkese gönderildi' and becomes disabled. The popup opens api.whatsapp.com with phone 90…, and staff without a phone get no send button. Payroll: adding a 300₺ advance turns net 800 into 500 and updates advance-list and payroll-net-total. A blank amount keeps the modal open. Excel export has 3 sheets. Orders: order-copy-0 (with clipboard permission) and order-whatsapp-0 each POST /api/orders, with channel 'Kopyalandı' and 'WhatsApp'. Order history: status toggle, filter and delete all work. Copy week copies the shifts of ALL staff, so clean up after using it."
+}

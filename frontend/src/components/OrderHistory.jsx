@@ -18,7 +18,7 @@ export const OrderHistory = ({ suppliers, refreshKey }) => {
   const shown = orders.filter((o) => !filter || o.supplier === filter);
   return (
     <section className="panel order-history" data-testid="order-history">
-      <div className="panel-head movements-head">
+      <div className="panel-head">
         <div><h3>Sipariş geçmişi</h3><span className="muted">Sipariş listesinden kopyalanan veya WhatsApp'tan gönderilen siparişler</span></div>
         <div className="movements-filter"><PackageCheck size={18} className="panel-icon" />
           <select value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="order-history-filter"><option value="">Tüm tedarikçiler</option>{names.map((n) => <option key={n} value={n}>{n}</option>)}</select>

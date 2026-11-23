@@ -105,3 +105,10 @@
 - Staff phone + per-person WhatsApp weekly plan link.
 - Backend pytest (15) passed; frontend verified via Playwright script. Testing agent run was interrupted (credits).
 - Backlog: split server.py into routers (~640 lines).
+
+## Iteration 12 (Haziran 2026)
+- Leaves (leaves collection, 5 types, annual_leave_days default 14, balance in calendar).
+- Salary advances (advances collection) subtracted in payroll (net_pay), Excel 'Avanslar' sheet.
+- Bulk WhatsApp plan dialog (sequential per-person send).
+- Order history (orders collection) auto-saved from order list copy/WhatsApp; status toggle.
+- Tested iteration_12.json: all passed; UI nits fixed.
