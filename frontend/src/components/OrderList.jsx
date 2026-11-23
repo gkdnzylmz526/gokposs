@@ -14,6 +14,8 @@ const orderText = (group) => [
   "Teşekkürler.",
 ].join("\n");
 
+const waPhone = (phone) => { const d = (phone || "").replace(/\D/g, ""); if (!d) return ""; if (d.startsWith("90")) return d; if (d.startsWith("0")) return `9${d}`; return d.length === 10 ? `90${d}` : d; };
+
 const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast.success("Sipariş listesi kopyalandı"); } catch { toast.error("Kopyalanamadı"); } };
 
 export const OrderList = ({ refreshKey }) => {
@@ -30,7 +32,7 @@ export const OrderList = ({ refreshKey }) => {
       <div className="order-groups">
         {groups.map((g, gi) => (
           <article className="order-group" key={g.supplier} data-testid={`order-group-${gi}`}>
-            <div className="order-group-head"><b>{g.supplier}</b><span>{money(g.estimated_total)}</span></div>
+            <div className="order-group-head"><b>{g.supplier}{g.phone && <small data-testid={`order-phone-${gi}`}>{g.phone}</small>}</b><span>{money(g.estimated_total)}</span></div>
             {g.items.map((i, ii) => (
               <div className="order-item" key={i.inventory_id} data-testid={`order-item-${gi}-${ii}`}>
                 <span>{i.name}<small>Mevcut {num(i.quantity)} / min {num(i.minimum)} {i.unit}</small></span>
@@ -39,7 +41,7 @@ export const OrderList = ({ refreshKey }) => {
             ))}
             <div className="order-actions">
               <button className="secondary-button" data-testid={`order-copy-${gi}`} onClick={() => copy(orderText(g))}><Copy size={14} /> Kopyala</button>
-              <a className="secondary-button" data-testid={`order-whatsapp-${gi}`} href={`https://wa.me/?text=${encodeURIComponent(orderText(g))}`} target="_blank" rel="noreferrer"><MessageCircle size={14} /> WhatsApp</a>
+              <a className="secondary-button" data-testid={`order-whatsapp-${gi}`} href={`https://wa.me/${waPhone(g.phone)}?text=${encodeURIComponent(orderText(g))}`} target="_blank" rel="noreferrer"><MessageCircle size={14} /> {g.phone ? "WhatsApp'ta gönder" : "WhatsApp"}</a>
             </div>
           </article>
         ))}

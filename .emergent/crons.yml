@@ -7,3 +7,11 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: weekly-summary
+    description: "Emails last week's top sellers and total profit every Monday at 09:00 Istanbul time"
+    cron: "0 9 * * 1"
+    timezone: "Europe/Istanbul"
+    endpoint: "{{BASE_URL}}/api/cron/weekly-summary"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

@@ -18,7 +18,7 @@ from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
 from exports import build_excel, build_pdf
-from mailer import send_report_email
+from mailer import send_report_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -48,9 +48,21 @@ class SalesEntry(Entry):
     note: str = ""
     stock_moves: List[Dict[str, Any]] = []
 
+class PurchaseItem(BaseModel):
+    inventory_id: str
+    quantity: float
+    unit_price: float = 0
+
 class ExpenseEntry(Entry):
     category: str = "Diğer"
     amount: float = 0
+    note: str = ""
+    purchases: List[PurchaseItem] = []
+    stock_moves: List[Dict[str, Any]] = []
+
+class SupplierEntry(Entry):
+    name: str
+    phone: str = ""
     note: str = ""
 
 class InventoryEntry(Entry):
@@ -85,8 +97,9 @@ class ProductEntry(Entry):
     active: bool = True
     recipe: List[RecipeItem] = []
     cost_from_recipe: bool = False
+    target_margin: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry}
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -107,6 +120,7 @@ async def dashboard():
     staff = await list_items("staff", limit=None)
     cash = await list_items("cash")
     products = await list_items("products", limit=None)
+    suppliers = await list_items("suppliers", limit=None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     week_sales = await list_items("sales", week_start, None)
@@ -117,7 +131,7 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -171,13 +185,11 @@ async def export_report(period: str = PERIOD, format: str = Query("xlsx", patter
         return Response(build_pdf(report), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
     return Response(build_excel(report), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
-async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, Any]:
+async def _deliver(kind: str, trigger: str, key: str | None, job) -> Dict[str, Any]:
     day = datetime.now(TZ).date().isoformat()
-    record = {"id": str(uuid.uuid4()), "date": day, "trigger": trigger, "key": key, "recipient": os.environ.get("REPORT_RECIPIENT", ""), "created_at": datetime.now(timezone.utc).isoformat()}
+    record = {"id": str(uuid.uuid4()), "kind": kind, "date": day, "trigger": trigger, "key": key, "recipient": os.environ.get("REPORT_RECIPIENT", ""), "created_at": datetime.now(timezone.utc).isoformat()}
     try:
-        report = await full_report("daily")
-        report["low_stock"] = [i for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
-        await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
+        await job(day)
         record["status"] = "sent"
     except Exception as exc:
         logging.exception("Daily report email failed")
@@ -185,9 +197,22 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
     await db.report_deliveries.insert_one({**record})
     return record
 
-@api.post("/cron/daily-report")
-async def cron_daily_report(request: Request, background: BackgroundTasks):
-    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, Any]:
+    async def job(day):
+        report = await full_report("daily")
+        report["low_stock"] = [i for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
+        await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
+    return await _deliver("daily", trigger, key, job)
+
+async def send_weekly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
+    async def job(day):
+        today = datetime.now(TZ).date()
+        start, end = today - timedelta(days=today.weekday() + 7), today - timedelta(days=today.weekday() + 1)
+        report = await build_report("custom", start.isoformat(), end.isoformat())
+        await asyncio.to_thread(send_weekly_email, report, f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}")
+    return await _deliver("weekly", trigger, key, job)
+
+async def accept_cron(request: Request) -> str | None:
     secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
     auth = request.headers.get("authorization", "")
     if not secret or not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], secret):
@@ -201,13 +226,30 @@ async def cron_daily_report(request: Request, background: BackgroundTasks):
     try:
         await db.cron_runs.insert_one({"run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat()})
     except DuplicateKeyError:
+        return None
+    return run_id
+
+@api.post("/cron/daily-report")
+async def cron_daily_report(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    run_id = await accept_cron(request)
+    if not run_id:
         return {"status": "duplicate"}
     background.add_task(send_daily_report, "cron", run_id)
     return {"status": "accepted"}
 
+@api.post("/cron/weekly-summary")
+async def cron_weekly_summary(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    run_id = await accept_cron(request)
+    if not run_id:
+        return {"status": "duplicate"}
+    background.add_task(send_weekly_summary, "cron", run_id)
+    return {"status": "accepted"}
+
 @api.post("/email/send-now")
-async def email_send_now():
-    record = await send_daily_report("manual")
+async def email_send_now(kind: str = Query("daily", pattern="^(daily|weekly)$")):
+    record = await (send_weekly_summary if kind == "weekly" else send_daily_report)("manual")
     if record["status"] != "sent":
         return {"status": "failed", "detail": "E-posta gönderilemedi. Gmail bilgilerini kontrol edin."}
     return {"status": "sent", "recipient": record["recipient"]}
@@ -215,7 +257,7 @@ async def email_send_now():
 @api.get("/email/status")
 async def email_status():
     last = await db.report_deliveries.find({}, {"_id": 0}).sort("created_at", -1).to_list(5)
-    return {"recipient": os.environ.get("REPORT_RECIPIENT", ""), "configured": bool(os.environ.get("GMAIL_USERNAME") and os.environ.get("GMAIL_APP_PASSWORD")), "schedule": "Her gece 23:59", "history": last}
+    return {"recipient": os.environ.get("REPORT_RECIPIENT", ""), "configured": bool(os.environ.get("GMAIL_USERNAME") and os.environ.get("GMAIL_APP_PASSWORD")), "schedule": "Her gece 23:59", "weekly_schedule": "Her pazartesi 09:00", "history": last}
 
 @api.get("/cash/reconciliation")
 async def cash_reconciliation(date: str | None = None):
@@ -283,6 +325,7 @@ def suggested_amount(item: Dict[str, Any]) -> float:
 @api.get("/order-list")
 async def order_list():
     groups: Dict[str, Dict[str, Any]] = {}
+    phones = {_tr_key(x["name"]): x.get("phone", "") for x in await list_items("suppliers", limit=None)}
     for item in await list_items("inventory", limit=None):
         if float(item.get("quantity", 0)) > float(item.get("minimum", 0)):
             continue
@@ -290,11 +333,25 @@ async def order_list():
         if not amount:
             continue
         supplier = item.get("supplier") or "Tedarikçi belirtilmemiş"
-        group = groups.setdefault(supplier, {"supplier": supplier, "items": [], "estimated_total": 0})
+        group = groups.setdefault(supplier, {"supplier": supplier, "phone": phones.get(_tr_key(item.get("supplier", "")), ""), "items": [], "estimated_total": 0})
         cost = round(amount * float(item.get("unit_cost", 0)), 2)
         group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost})
         group["estimated_total"] = round(group["estimated_total"] + cost, 2)
     return sorted(groups.values(), key=lambda g: g["supplier"])
+
+async def apply_purchases(doc: Dict[str, Any], sign: int, reason: str) -> None:
+    moves = [{"inventory_id": p["inventory_id"], "delta": float(p["quantity"])} for p in doc.get("purchases", [])]
+    await apply_moves(moves, sign, {"id": doc["id"], "product_name": ""}, reason)
+    if sign > 0:
+        for p in doc.get("purchases", []):
+            if float(p.get("unit_price", 0)) > 0:
+                await db.inventory.update_one({"id": p["inventory_id"]}, {"$set": {"unit_cost": float(p["unit_price"])}})
+    doc["stock_moves"] = moves if sign > 0 else []
+    await recompute_product_costs()
+
+def _purchase_total(doc: Dict[str, Any]) -> None:
+    if doc.get("purchases") and not float(doc.get("amount", 0)):
+        doc["amount"] = round(sum(float(p["quantity"]) * float(p.get("unit_price", 0)) for p in doc["purchases"]), 2)
 
 async def fill_sale_cost(doc: Dict[str, Any]) -> None:
     if not doc.get("unit_cost") and doc.get("product_id"):
@@ -314,6 +371,9 @@ def make_crud(name: str, model: type[BaseModel]):
             await fill_sale_cost(doc)
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış")
+        if name == "expenses" and doc.get("purchases"):
+            _purchase_total(doc)
+            await apply_purchases(doc, 1, f"Alış · {doc['category']}")
         await db[name].insert_one({**doc})
         if name == "inventory" and doc["quantity"]:
             await log_movement(doc, doc["quantity"], "İlk kayıt")
@@ -328,6 +388,10 @@ def make_crud(name: str, model: type[BaseModel]):
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
         if name == "products":
             doc = await with_recipe_cost(doc)
+        if name == "expenses" and (old.get("purchases") or doc.get("purchases")):
+            await apply_purchases(old, -1, "Alış düzeltildi (eski kayıt geri alındı)")
+            _purchase_total(doc)
+            await apply_purchases(doc, 1, f"Alış düzeltildi · {doc['category']}")
         if name == "sales":
             await fill_sale_cost(doc)
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış düzeltildi (eski kayıt geri alındı)")
@@ -346,6 +410,8 @@ def make_crud(name: str, model: type[BaseModel]):
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         if name == "sales":
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
+        if name == "expenses" and old.get("purchases"):
+            await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
             await recompute_product_costs()

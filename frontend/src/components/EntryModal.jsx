@@ -24,8 +24,33 @@ function RecipeEditor({ value, inventory, onChange }) {
   );
 }
 
+function PurchaseEditor({ value, inventory, onChange }) {
+  const rows = value || [];
+  const update = (i, patch) => onChange(rows.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const total = rows.reduce((sum, r) => sum + Number(r.quantity || 0) * Number(r.unit_price || 0), 0);
+  return (
+    <div className="recipe-editor" data-testid="purchase-editor">
+      <span className="recipe-title">Alınan malzemeler (stoka eklenir, alış fiyatı güncellenir)</span>
+      {rows.map((row, i) => (
+        <div className="purchase-row" key={i} data-testid={`purchase-row-${i}`}>
+          <select value={row.inventory_id} data-testid={`purchase-ingredient-${i}`} onChange={(e) => update(i, { inventory_id: e.target.value })}>
+            <option value="">Malzeme seçin</option>
+            {inventory.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}
+          </select>
+          <input type="number" step="any" placeholder="Miktar" value={row.quantity} data-testid={`purchase-quantity-${i}`} onChange={(e) => update(i, { quantity: e.target.value })} />
+          <input type="number" step="any" placeholder="Birim ₺" value={row.unit_price} data-testid={`purchase-price-${i}`} onChange={(e) => update(i, { unit_price: e.target.value })} />
+          <button type="button" className="icon-button" data-testid={`purchase-remove-${i}`} onClick={() => onChange(rows.filter((_, idx) => idx !== i))}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      {inventory.length > 0 ? <button type="button" className="text-button" data-testid="purchase-add-button" onClick={() => onChange([...rows, { inventory_id: "", quantity: "", unit_price: "" }])}>+ Alınan malzeme ekle</button> : <small className="muted">Stok kalemi yok; önce Stok Sayımı'na malzeme ekleyin.</small>}
+      {rows.length > 0 && <small className="muted" data-testid="purchase-total">Kalemler toplamı: {total.toLocaleString("tr-TR", { maximumFractionDigits: 2 })} ₺ (tutar boşsa bu kullanılır)</small>}
+    </div>
+  );
+}
+
 function Field({ field, value, onChange, inventory, autoFocus }) {
   if (field.type === "recipe") return <RecipeEditor value={value} inventory={inventory} onChange={onChange} />;
+  if (field.type === "purchases") return <PurchaseEditor value={value} inventory={inventory} onChange={onChange} />;
   return (
     <label data-testid={`${field.key}-field`}>{field.label}
       {field.type === "select"
