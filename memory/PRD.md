@@ -73,3 +73,9 @@
 - Turkish calendar date picker (shadcn Calendar, tr locale, dd.MM.yyyy) for custom report range.
 - Tested iteration_6.json: no functional bugs; design nits fixed.
 - PENDING: valid 16-letter Gmail app password (current GMAIL_APP_PASSWORD rejected by Gmail).
+
+## Iteration 7 (Haziran 2026)
+- Inventory: unit_cost, target, supplier. GET /api/order-list (critical items grouped by supplier, suggested = target - qty or 2×min - qty) with copy/WhatsApp share UI.
+- Recipe cost auto-calculation (cost_from_recipe), recomputed on inventory changes; sales fill unit_cost from product if missing.
+- Gmail app password fixed: manual send verified (status sent). Nightly cron 23:59 Europe/Istanbul active.
+- Tested iteration_7.json: all passed; minor nits fixed.

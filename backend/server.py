@@ -287,12 +287,19 @@ async def order_list():
         if float(item.get("quantity", 0)) > float(item.get("minimum", 0)):
             continue
         amount = suggested_amount(item)
+        if not amount:
+            continue
         supplier = item.get("supplier") or "Tedarikçi belirtilmemiş"
         group = groups.setdefault(supplier, {"supplier": supplier, "items": [], "estimated_total": 0})
         cost = round(amount * float(item.get("unit_cost", 0)), 2)
         group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost})
         group["estimated_total"] = round(group["estimated_total"] + cost, 2)
     return sorted(groups.values(), key=lambda g: g["supplier"])
+
+async def fill_sale_cost(doc: Dict[str, Any]) -> None:
+    if not doc.get("unit_cost") and doc.get("product_id"):
+        product = await db.products.find_one({"id": doc["product_id"]}, {"_id": 0, "cost": 1})
+        doc["unit_cost"] = float((product or {}).get("cost", 0))
 
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
@@ -304,6 +311,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "sales":
+            await fill_sale_cost(doc)
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış")
         await db[name].insert_one({**doc})
@@ -321,6 +329,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "sales":
+            await fill_sale_cost(doc)
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış düzeltildi (eski kayıt geri alındı)")
             doc["stock_moves"] = await stock_moves(doc)
             await apply_moves(doc["stock_moves"], 1, doc, "Satış düzeltildi (yeni kayıt)")

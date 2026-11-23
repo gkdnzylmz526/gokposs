@@ -34,7 +34,7 @@ export const OrderList = ({ refreshKey }) => {
             {g.items.map((i, ii) => (
               <div className="order-item" key={i.inventory_id} data-testid={`order-item-${gi}-${ii}`}>
                 <span>{i.name}<small>Mevcut {num(i.quantity)} / min {num(i.minimum)} {i.unit}</small></span>
-                <strong>{num(i.suggested)} {i.unit}</strong>
+                <strong>{num(i.suggested)} {i.unit}{i.estimated_cost > 0 && <small>{money(i.estimated_cost)}</small>}</strong>
               </div>
             ))}
             <div className="order-actions">

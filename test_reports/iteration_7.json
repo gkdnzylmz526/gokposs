@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 7: tested the automatic order list and recipe-cost features on the backend and frontend. Backend: 9 of 9 pytest tests passed. 5 are new for iteration 7 and 4 are iteration-6 regression tests. Frontend: the full UI flow passed. It created ingredients with target, unit_cost and supplier in the modal, checked the order list grouping and amounts, the WhatsApp links and copy-to-clipboard, built a product with a recipe, checked the auto cost with the 'tariften' badge and per-ingredient costs, recorded a sale that dropped stock below minimum, and checked the order list update, report profit, recompute after a unit_cost edit, stock movements and the custom-range calendar.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST/PUT /api/sales", "issue": "The backend takes unit_cost from the client payload and does not read it from product.cost. A sale posted without unit_cost is stored with unit_cost=0, so profit is overstated. The frontend always sends product.cost, so the UI is not affected."},
+      {"endpoint": "GET /api/order-list", "issue": "An item with minimum=0 and quantity=0 is listed with suggested=0, because the check is 0<=0. If target is lower than the current quantity, the item is also listed with suggested 0. Consider leaving out items whose suggested amount is 0."},
+      {"endpoint": "PUT /api/products", "issue": "When the recipe is removed from a product, the old recipe-derived cost is kept as the manual cost, since the frontend form still holds it. This may be acceptable, but nothing tells the user."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Menü Ürünleri recipe summary", "issues": ["Recipe amounts use dot decimals ('0.1 kg') while the rest of the UI uses tr-TR formatting ('0,1')."]},
+      {"screen": "Order list group card", "issues": ["Per-item estimated cost is not shown, only the group total.", "There is an empty gap between the group header and the first item in single-item groups."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration7_order_list_recipe_cost.py", "/app/backend/tests/test_iteration6_stock_movements.py", "/app/test_reports/pytest/pytest_iter7.xml"],
+  "action_items": [
+    "Optional: on sale create/update, have the backend set unit_cost from product.cost when it is missing or 0.",
+    "Optional: leave items with suggested == 0 out of the order list.",
+    "Optional: format recipe amounts with tr-TR in ProductView."
+  ],
+  "critical_code_review_comments": [
+    "recompute_product_costs runs on every inventory POST/PUT/DELETE, including quantity-only edits. It does one update per product (N writes). This is fine at this scale, but it could be limited to unit_cost changes.",
+    "Sale cost is a snapshot at sale time. This is correct, but past report profit does not change when an ingredient price changes. That is expected and could be documented for the user.",
+    "Empty state ('Sipariş gereken malzeme yok') was checked by code review only, because non-test data with critical stock exists in the DB."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration7_order_list_recipe_cost.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Every TEST_ record created was deleted by id (sales, products, inventory), along with their stock_movements. report_deliveries and cron_runs were already 0. The DB was NOT empty at the start: non-test records Domates, Dana kıyma (inventory) and Köfte (product), plus 2 stock_movements, created at 14:24 by someone else. They were left untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with: cd /app/backend && python -m pytest tests/test_iteration7_order_list_recipe_cost.py tests/test_iteration6_stock_movements.py. Skip test_iteration5 cron tests and do not call /api/email/send-now, because the Gmail password is invalid. EntryModal inputs follow field order. Testids used: save-entry-button, recipe-ingredient-{i}, recipe-amount-{i}, product_name-select."
+}
