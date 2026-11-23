@@ -1,116 +1,100 @@
 import asyncio
-from contextlib import suppress
-from fastapi import FastAPI, APIRouter, Query
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import ASCENDING, DESCENDING, IndexModel
-import os
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+import os
 import uuid
+from contextlib import suppress
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
 
+from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
+client = AsyncIOMotorClient(os.environ["MONGO_URL"])
+db = client[os.environ["DB_NAME"]]
+api = APIRouter(prefix="/api")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# One entry per collection: every field a route filters, sorts or dedupes on. Add the index in the same edit as the query.
-INDEXES: dict[str, list[IndexModel]] = {
-    "status_checks": [
-        IndexModel([("id", ASCENDING)], name="id", unique=True),
-        IndexModel([("timestamp", DESCENDING)], name="timestamp_desc"),
-    ],
-}
-
-
-async def ensure_indexes() -> None:
-    for collection, models in INDEXES.items():
-        for model in models:  # one at a time so a bad spec skips only itself
-            try:
-                await db[collection].create_indexes([model])
-            except Exception as exc:  # never block boot on an index; the log line names what to fix
-                logging.getLogger(__name__).error("ensure_indexes(%s.%s): %s", collection, model.document["name"], exc)
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
+class Entry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class SalesEntry(Entry):
+    channel: str = "Salon"
+    amount: float = 0
+    note: str = ""
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+class ExpenseEntry(Entry):
+    category: str = "Diğer"
+    amount: float = 0
+    note: str = ""
+
+class InventoryEntry(Entry):
+    name: str
+    quantity: float = 0
+    unit: str = "adet"
+    minimum: float = 0
+
+class StaffEntry(Entry):
+    name: str
+    shift: str = "09:00 – 17:00"
+    task: str = ""
+    status: str = "Bekliyor"
+
+class CashEntry(Entry):
+    opening: float = 0
+    closing: float = 0
+    note: str = ""
+
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry}
+
+async def list_items(collection: str) -> List[Dict[str, Any]]:
+    return await db[collection].find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+@api.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Restoran Asistanı hazır"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+@api.get("/dashboard")
+async def dashboard():
+    sales = await list_items("sales")
+    expenses = await list_items("expenses")
+    inventory = await list_items("inventory")
+    staff = await list_items("staff")
+    cash = await list_items("cash")
+    revenue = sum(float(item.get("amount", 0)) for item in sales)
+    spent = sum(float(item.get("amount", 0)) for item in expenses)
+    low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash}
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks(limit: int = Query(20, ge=1, le=100)):
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+def make_crud(name: str, model: type[BaseModel]):
+    @api.get(f"/{name}")
+    async def get_items():
+        return await list_items(name)
+    @api.post(f"/{name}", response_model=model)
+    async def create_item(item: model):
+        doc = item.model_dump()
+        await db[name].insert_one(doc)
+        return item
+    @api.delete(f"/{name}/{{item_id}}")
+    async def delete_item(item_id: str):
+        result = await db[name].delete_one({"id": item_id})
+        if not result.deleted_count:
+            raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+        return {"ok": True}
+    return get_items, create_item, delete_item
 
-# Include the router in the main app
-app.include_router(api_router)
+for collection_name, collection_model in COLLECTIONS.items():
+    make_crud(collection_name, collection_model)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("startup")
-async def start_index_build():
-    app.state.index_task = asyncio.create_task(ensure_indexes())  # background: a big index build must not block boot
+app = FastAPI(title="Restoran Asistanı API")
+app.include_router(api)
+app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    app.state.index_task.cancel()  # stop a build still running before its client closes
-    with suppress(asyncio.CancelledError):
-        await app.state.index_task
+async def shutdown():
     client.close()

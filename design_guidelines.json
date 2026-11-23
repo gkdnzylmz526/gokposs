@@ -1,0 +1,53 @@
+{
+  "project_name": "Restoran Asistanı",
+  "app_type": "dashboard",
+  "archetype": "ORGANIC & EARTHY / WARM PROFESSIONAL",
+  "description": "Restoran müdürünün günlük operasyonlarını, satışları, ciro takibini, alış/gider kayıtlarını, stok sayımını, personel vardiyalarını ve kasa işlemlerini tek ekrandan yönetebileceği, yapay zeka destekli akıllı restoran asistanı.",
+  "typography": {
+    "heading_font": "Outfit, sans-serif",
+    "body_font": "Plus Jakarta Sans, sans-serif",
+    "mono_font": "JetBrains Mono, monospace"
+  },
+  "colors": {
+    "primary": "#D97706",
+    "primary_hover": "#B45309",
+    "secondary": "#1E293B",
+    "background_light": "#F8FAFC",
+    "card_bg": "#FFFFFF",
+    "accent": "#059669",
+    "warning": "#DC2626",
+    "muted": "#64748B",
+    "border": "#E2E8F0"
+  },
+  "forbidden_colors": [
+    "#1B93A4",
+    "#7351B7"
+  ],
+  "forbidden_fonts": [
+    "space grotesk",
+    "inter"
+  ],
+  "components": [
+    "Dashboard Overview",
+    "Daily Sales & Revenue Tracking (Günlük Satış/Ciro)",
+    "Purchases & Expenses (Alış ve Giderler)",
+    "Inventory & Material Counts (Stok ve Malzeme Sayımı)",
+    "Staff Shifts & Tasks (Personel Vardiya ve Görevler)",
+    "Cash Register Opening/Closing (Kasa Açılış/Kapanış Özeti)",
+    "AI Manager Advisor & Reports (Yapay Zeka Danışmanı & Raporlar)"
+  ],
+  "features_included": [
+    "No-auth direct access tailored for restaurant manager",
+    "TL currency support",
+    "Interactive charts with Recharts",
+    "Data persistence via localStorage & mock state",
+    "Quick action modals for adding sales, expenses, stock items, shifts, cash logs",
+    "AI Manager recommendations and quick Q&A helper",
+    "Export / Report generator (Daily, Weekly, Monthly)"
+  ],
+  "accessibility_and_testing": {
+    "all_interactive_elements_must_have_test_id": true,
+    "contrast_ratio": "WCAG AA compliant",
+    "reduced_motion_supported": true
+  }
+}
