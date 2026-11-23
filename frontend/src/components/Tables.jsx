@@ -69,7 +69,7 @@ export const TablesBoard = ({ onAddTable, onEditTable, onDeleteTable, onChanged,
           {data.tables.map((t) => (
             <div key={t.id} role="button" tabIndex={0} className={`table-tile ${t.order ? "busy" : ""} ${openId === t.id ? "selected" : ""}`} data-testid={`table-tile-${t.name}`} onClick={() => setOpenId(t.id)}>
               <div className="table-tile-top"><Armchair size={16} /><span>{t.seats} kişilik</span>{onEditTable && <span className="table-tile-actions"><button className="text-button tiny" data-testid={`table-edit-${t.name}`} onClick={(e) => { e.stopPropagation(); onEditTable(t); }}>Düzenle</button><button className="text-button tiny danger-inline" data-testid={`table-delete-${t.name}`} onClick={(e) => { e.stopPropagation(); if (window.confirm(`Masa ${t.name} silinsin mi?`)) onDeleteTable(t.id); }}>Sil</button></span>}</div>
-              <b>{t.name}</b>
+              <b className={t.name.length > 6 ? "long" : ""}>{t.name}</b>
               <small>{t.order ? `${money(t.order.total)} · ${since(t.order.opened_at)}` : "Boş"}</small>
             </div>
           ))}

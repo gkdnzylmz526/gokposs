@@ -111,3 +111,4 @@
 .table-tile b { overflow-wrap:anywhere; line-height:1.1; } .table-tile { min-width:0; overflow:hidden; }
 .calc-rows > .text-button { display:inline-flex; align-items:center; gap:5px; justify-self:start; } .calc-result div strong { display:block; font:600 22px Outfit; }
 @media(max-width:480px){ .staff-tabs button { padding:13px 4px; font-size:12px; gap:5px; } }
+.table-tile b.long { font-size:16px; overflow-wrap:break-word; word-break:normal; }

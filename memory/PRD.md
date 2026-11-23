@@ -139,3 +139,17 @@
 - Staff "Bugün sattıklarım" (sales.created_by).
 - Public QR menu (/menu, /api/public/menu) + QR card on Menü page.
 - Tested iteration_16.json; fixed dashboard waste key, atomic waste PUT, required select defaults.
+
+## Iteration 17–18 (Haziran 2026)
+- Multi-restaurant: Florya Taşfırın / Etiler Marmaris / Dürümtır (backend/scope.py ScopedDB + contextvar, header X-Restaurant, 'all' = read-only union). Menu (products) & suppliers shared; all other data per restaurant. Existing data migrated to florya-tasfirin on startup.
+- Recipes shared: ingredient resolved by same name in selling restaurant; sale cost uses that restaurant's prices; product.cost = average.
+- Staff users bound to one restaurant + optional staff record (PATCH /api/users/{id}/assignment).
+- Masalar: tables CRUD, /api/tables-view, items/close/cancel; close creates sales + stock + tip.
+- Bahşiş: tips collection + /api/tips/distribution (hours from attendance or shifts).
+- Giriş-çıkış: attendance collection, /api/attendance/me|clock (staff), payroll uses real hours (hours_source).
+- Ürün Maliyeti page (/api/product-costs) with per-restaurant costs + cost calculator; restaurant summary cards (/api/restaurants/summary).
+- Cash reminder per restaurant. Tested iteration_17/18: all pass. Redeploy requested.
+
+## Backlog
+- P1: Per-restaurant sections in nightly/weekly e-mails (now combined)
+- P2: Kitchen display, SKT (expiry) alerts, loyalty, split bill per table

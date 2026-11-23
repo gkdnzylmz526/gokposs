@@ -1,0 +1,33 @@
+{
+  "summary": "I retested the iteration-17 fixes. All fixes are verified. Backend: the new suite tests/test_iteration18_fixes.py passed 11/11, and the regression run of it17 + it15 + it16 passed 63/63 in one session. Frontend (Playwright, 1920px and 390px): table close and cancel in admin Masalar refresh Satışlar, Stok Sayımı and the restaurant summary without a page reload. Deleting a table that has an open order shows the 409 toast and keeps the table; after cancel the delete works. In the staff app, closing a table refreshes 'Bugün sattıklarım' and the stock tab. Long table names wrap inside the tile. The 'Yeni masa' form prefills seats=4 and the staff form prefills annual leave=14. The calculator add-row button sits inline (flex). calc-real-margin is readable (green, 22px). The audit log shows readable Masa, Satış and Giriş-çıkış summaries and translated filter labels. Staff tabs fit at 390px with no horizontal scroll. Restaurant switcher, Ürün Maliyeti, tips and attendance panels, and the user restaurant/staff selects all work. No page errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "tests/test_iteration15_staff_audit_pwa.py, tests/test_iteration16_payment_waste_menu.py (test code only)", "issue": "Sales leak between restaurants. These suites create staff sales with the member account, and the sales land in whichever restaurant the member is assigned to (it was Etiler, left over from an earlier UI setup). Cleanup then deletes without the matching X-Restaurant header (it defaults to Florya), gets 404, and the sales stay. I found 4 leaked TEST_it15_prod sales in Etiler; they showed in 'Bugün sattıklarım' and in the Etiler summary (₺1.020). I deleted them."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Masalar tile (staff 390px and admin)", "issues": ["overflow-wrap:anywhere with a 24px font breaks short names in the middle (e.g. 'TEST_UI17_S' / '1'). Could reduce the font size for long names or prefer word breaks. Cosmetic only."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration18_fixes.py", "/app/test_reports/pytest/pytest_it18.xml"],
+  "action_items": [
+    "In the it15 and it16 test setup, explicitly assign the member to florya-tasfirin with PATCH /api/users/{uid}/assignment, or delete with the member's restaurant X-Restaurant header in cleanup, so that sales no longer leak.",
+    "Optional: table names in tiles break mid-word; consider a smaller font for long names."
+  ],
+  "critical_code_review_comments": [
+    "table_close sets status to 'Kapanıyor' before inserting sales. On an exception the order goes back to 'Açık' with the remaining items, which is OK. But if the process crashes mid-close, the order stays 'Kapanıyor'. tables-view hides it and the table can never be deleted (409), because only 'Açık' and 'Kapanıyor' are checked. Consider a recovery path, e.g. treat 'Kapanıyor' older than N minutes as 'Açık'.",
+    "The table-close tip is inserted straight into db.tips and has no audit entry of its own; it only appears inside the 'Hesap kapattı' summary. This is fine but worth noting.",
+    "The restaurant summary today_profit equals revenue minus expenses, so ingredient cost (unit_cost) is not subtracted. Etiler showed profit = revenue even though the sale had a cost of 10/unit. Confirm this is the intended definition of 'kâr'.",
+    "server.py is 1353 lines; consider splitting it into routers (tables, attendance/tips, staff, CRUD)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration18_fixes.py"],
+  "success_rate": {"backend": "100% (11/11 new, 63/63 regression it15+it16+it17)", "frontend": "100% of requested checks"},
+  "seed_data_creation": "Only TEST_ data, all deleted by id: TEST_It18_* inventory, product, tables, staff, attendance and sales; TEST_UI17_* data via ui_setup_it17 cleanup; plus the 4 leaked TEST_it15_prod sales. The member was restored to role=staff with restaurant florya-tasfirin and no staff link. Product 'adana' kept.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env|cut -d= -f2); pytest tests/test_iteration18_fixes.py tests/test_iteration17_multi_restaurant.py tests/test_iteration15_staff_audit_pwa.py tests/test_iteration16_payment_waste_menu.py -n 0. it18 saves the member's role and assignment at setup and restores them at teardown. UI: python3 tests/ui_setup_it17.py > /tmp/x.json; for fresh single-use tickets use python3 tests/clerk_ticket.py <email>; clean up with ui_setup_it17.py cleanup. Masalar testids: table-tile-{name}, table-delete-{name}, table-add-product-{pid}, table-payment-{Nakit|Kart|Yemek kartı}, table-close-button, table-cancel-button, tables-open-count. Do not run it14 together with it15/16."
+}
