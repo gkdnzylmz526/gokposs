@@ -459,6 +459,7 @@ async def copy_week(req: CopyWeekRequest):
             continue
         doc = ShiftEntry(staff_id=shift["staff_id"], date=new_date, start=shift["start"], end=shift["end"], task=shift.get("task", "")).model_dump()
         await db.shifts.insert_one({**doc})
+        existing.add((shift["staff_id"], new_date, shift["start"]))
         created += 1
     return {"created": created, "source_count": len(source)}
 

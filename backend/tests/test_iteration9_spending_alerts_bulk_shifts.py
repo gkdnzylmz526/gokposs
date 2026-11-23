@@ -190,7 +190,7 @@ class TestShifts:
         assert old["start"] == "09:00" and old["end"] == "17:00"
         dash = {s["id"]: s for s in requests.get(f"{API}/dashboard").json()["shifts"]}
         assert s1["id"] in dash and s2["id"] in dash
-        assert old["id"] not in dash
+        assert old["id"] in dash  # iteration 10: dashboard now returns all shifts (no 62-day window)
         assert dash[s1["id"]]["task"] == "Kasa"
         # update
         r = requests.put(f"{API}/shifts/{s1['id']}", json={**s1, "start": "11:00", "task": "Mutfak"})

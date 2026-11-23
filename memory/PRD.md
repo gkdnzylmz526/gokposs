@@ -93,3 +93,8 @@
 - Bulk apply suggested prices (/api/products/apply-suggested) with confirm dialog.
 - Weekly shift calendar (shifts collection, CRUD /api/shifts).
 - Tested iteration_9.json: all passed; shift validation + delete confirm added.
+
+## Iteration 10 (Haziran 2026)
+- Staff hourly_wage + weekly pay/payroll in shift calendar; copy previous week (/api/shifts/copy-week).
+- Ingredient price history chart + supplier price comparison (/api/inventory/{id}/prices).
+- Tested iteration_10.json: all passed; UI nits fixed.

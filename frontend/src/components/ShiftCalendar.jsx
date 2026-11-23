@@ -11,6 +11,7 @@ const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currenc
 const hours = (s) => { const [sh, sm] = s.start.split(":").map(Number); const [eh, em] = s.end.split(":").map(Number); let d = eh * 60 + em - (sh * 60 + sm); if (d < 0) d += 1440; return d / 60; };
 
 export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete, onReload }) => {
+  const [copying, setCopying] = useState(false);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const today = format(new Date(), "yyyy-MM-dd");
@@ -21,7 +22,8 @@ export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete, onReload
   const copyLastWeek = async () => {
     const from = format(addDays(weekStart, -7), "yyyy-MM-dd"), to = format(weekStart, "yyyy-MM-dd");
     if (!window.confirm("Önceki haftanın vardiyaları bu haftaya kopyalansın mı? Aynı gün ve saatteki vardiyalar tekrar eklenmez.")) return;
-    try { const { data } = await axios.post(`${API}/shifts/copy-week`, { from_start: from, to_start: to }); await onReload(); toast[data.created ? "success" : "info"](data.source_count ? `${data.created} vardiya kopyalandı` : "Önceki haftada vardiya yok"); } catch { toast.error("Vardiyalar kopyalanamadı"); }
+    setCopying(true);
+    try { const { data } = await axios.post(`${API}/shifts/copy-week`, { from_start: from, to_start: to }); await onReload(); toast[data.created ? "success" : "info"](!data.source_count ? "Önceki haftada vardiya yok" : data.created ? `${data.created} vardiya kopyalandı` : "Tüm vardiyalar zaten mevcut"); } catch { toast.error("Vardiyalar kopyalanamadı"); } finally { setCopying(false); }
   };
   const defaultHours = (person) => { const m = (person.shift || "").match(/(\d{1,2}:\d{2}).*?(\d{1,2}:\d{2})/); return m ? { start: m[1].padStart(5, "0"), end: m[2].padStart(5, "0") } : { start: "09:00", end: "17:00" }; };
   return (
@@ -29,7 +31,7 @@ export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete, onReload
       <div className="panel-head">
         <div><h3>Haftalık vardiya takvimi</h3><span className="muted">{format(days[0], "d MMMM", { locale: tr })} – {format(days[6], "d MMMM yyyy", { locale: tr })}</span></div>
         <div className="week-nav">
-          <button className="secondary-button" data-testid="shift-copy-week" onClick={copyLastWeek}><Copy size={13} /> Önceki haftayı kopyala</button>
+          <button className="secondary-button" data-testid="shift-copy-week" disabled={copying} onClick={copyLastWeek}><Copy size={13} /> {copying ? "Kopyalanıyor…" : "Önceki haftayı kopyala"}</button>
           <button className="icon-button" data-testid="shift-prev-week" onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={16} /></button>
           <button className="secondary-button" data-testid="shift-this-week" onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}>Bu hafta</button>
           <button className="icon-button" data-testid="shift-next-week" onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={16} /></button>

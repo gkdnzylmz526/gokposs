@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 10 tested the staff hourly_wage field, weekly pay and payroll, POST /api/shifts/copy-week, GET /api/inventory/{id}/prices and the PriceInsights panel, plus regression. Backend: the 13 new pytest tests all pass. Regression (iter6/7/8/9 and exports) passes: 63 passed, 1 skipped, which is the real-email cron test. One iter9 assertion was out of date and I updated it (dashboard shifts window). Frontend: every requested flow works end to end. No email or cron endpoint was called.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/shifts/copy-week", "issue": "Possible race. The existing-shift set is built once per request, and the UI button is not disabled while the request runs. A double-click or two parallel requests can insert duplicate shifts. Duplicates inside the source week are also copied, because `existing` is not updated inside the loop."},
+      {"endpoint": "GET /api/dashboard", "issue": "Now returns every shift with no date bound. This fixes navigation to older weeks, but the payload grows without limit over time. Consider a GET /api/shifts?from=&to= endpoint."},
+      {"endpoint": "POST /api/shifts", "issue": "staff_id existence is still not checked. Orphan shifts can be created. copy-week correctly skips them."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Stok Sayımı > PriceInsights chart", "issues": ["The y-axis labels (₺500,00 / ₺540,00) start at x=4, and the plot begins at P=28. The min/max labels therefore run under the first data point and the line, so the left label overlaps the first dot. Use a larger left padding (about 60px) or right-align the labels at x=P-4."]},
+      {"screen": "Ekip & Vardiya copy week", "issues": ["When every shift already exists, the toast reads '0 vardiya kopyalandı'. A clearer message would be 'Tüm vardiyalar zaten mevcut'.", "The 'Önceki haftayı kopyala' button has no loading or disabled state."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration10_wage_copyweek_prices.py", "/app/test_reports/pytest/iteration10.xml", "/app/tests/seed_iter10_ui.py", "/app/tests/cleanup_iter10.py"],
+  "action_items": [
+    "Optional: disable the copy-week button while its request is in flight, and add the inserted keys to `existing` inside the copy_week loop.",
+    "Optional: widen the PriceChart left padding so the y-labels do not overlap the first point.",
+    "Optional: bound the shifts in the dashboard payload, or add a range endpoint for shifts."
+  ],
+  "critical_code_review_comments": [
+    "copy_week: offset = to_start - from_start works for any offset (a 14-day offset was verified). The date type gives 422 on invalid dates such as 2031-02-30 or 'bad'.",
+    "ingredient_prices: the history sort relies on created_at string ordering. That is fine with uniform UTC isoformat. The supplier fallback chain expense.supplier -> inventory.supplier -> 'Tedarikçi belirtilmemiş' was verified.",
+    "PriceInsights: if the selected ingredient is deleted, `selected` keeps a stale id, the request returns 404 and the panel shows the empty state. Consider resetting selected when it is missing from inventory.",
+    "server.py is 574 lines and close to the 700-line limit. Split the routers (reports/email, stock/pricing, shifts) soon."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration10_wage_copyweek_prices.py", "/app/backend/tests/test_iteration9_spending_alerts_bulk_shifts.py (line 193: old shift is now expected in the dashboard)", "/app/tests/seed_iter10_ui.py", "/app/tests/cleanup_iter10.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "TEST_UI_Kiyma (purchases 500/540 from TEST_Kasap_A and 520 from TEST_Kasap_B), TEST_UI_Bos and staff TEST_UI_Mehmet (wage 100 -> 150) with 2 previous-week shifts were created, then all deleted by id. 140 orphan TEST stock_movements and 7 orphan price_alerts from the pytest runs were removed (orphans only, excluding the pre-existing ids). NOTE: the DB was NOT empty as the briefing said. It held Domates (inventory plus 3 expenses: Hal Mehmet 30/34, Manav Veli 28), staff Ayşe (wage 120) with shifts on 2026-11-17 and 2026-11-24, 1 Domates price_alert and 3 stock_movements. These look like main-agent data, so I left them untouched rather than wiping stock_movements, price_alerts and shifts wholesale. The DB is back to its exact pre-test counts. cron_runs is 0 and report_deliveries (3) is untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "System date is 2026-11-23 (a Monday). To run the tests: cd /app/backend && export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) && python -m pytest tests/test_iteration10_wage_copyweek_prices.py tests/test_iteration9_spending_alerts_bulk_shifts.py tests/test_iteration8_purchases_suppliers_weekly.py tests/test_iteration7_order_list_recipe_cost.py tests/test_iteration6_stock_movements.py tests/test_exports.py. test_exports needs the env var exported. The copy-week tests use 2031/2032/2040 weeks to avoid real data. Never call send-now or cron. UI testids verified: hourly_wage-field, shift-pay-{id}, shift-payroll-total, shift-copy-week, shift-prev/next-week, shift-cell-{staff}-{date}, price-insights, price-insights-select, price-chart, price-last, price-change, price-compare-row-{i}, price-saving."
+}

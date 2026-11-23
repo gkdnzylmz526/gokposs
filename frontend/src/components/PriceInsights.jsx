@@ -8,15 +8,15 @@ const day = (d) => new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", mon
 
 function PriceChart({ history }) {
   if (history.length < 2) return <div className="empty-state small">Grafik için en az 2 alış gerekli.</div>;
-  const W = 560, H = 150, P = 28;
+  const W = 560, H = 150, P = 28, L = 66;
   const prices = history.map((h) => h.unit_price);
   const min = Math.min(...prices), max = Math.max(...prices), span = max - min || 1;
-  const pts = history.map((h, i) => [P + (i * (W - 2 * P)) / (history.length - 1), H - P - ((h.unit_price - min) / span) * (H - 2 * P)]);
+  const pts = history.map((h, i) => [L + (i * (W - L - P)) / (history.length - 1), H - P - ((h.unit_price - min) / span) * (H - 2 * P)]);
   const path = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="price-chart" data-testid="price-chart">
-      <line x1={P} x2={W - P} y1={H - P} y2={H - P} className="axis" />
-      <text x={4} y={P} className="lbl">{money(max)}</text><text x={4} y={H - P} className="lbl">{money(min)}</text>
+      <line x1={L} x2={W - P} y1={H - P} y2={H - P} className="axis" />
+      <text x={L - 8} y={P + 3} textAnchor="end" className="lbl">{money(max)}</text><text x={L - 8} y={H - P + 3} textAnchor="end" className="lbl">{money(min)}</text>
       <path d={`${path} L${pts[pts.length - 1][0]},${H - P} L${pts[0][0]},${H - P} Z`} className="area" />
       <path d={path} className="line" />
       {pts.map((p, i) => <g key={i}><circle cx={p[0]} cy={p[1]} r="4" className="dot"><title>{`${day(history[i].date)} · ${money(history[i].unit_price)} · ${history[i].supplier}`}</title></circle>{(i === 0 || i === pts.length - 1 || history.length <= 8) && <text x={p[0]} y={H - 8} textAnchor="middle" className="lbl">{day(history[i].date)}</text>}</g>)}
