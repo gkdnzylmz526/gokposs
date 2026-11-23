@@ -136,23 +136,23 @@ def build_payroll_excel(data: dict) -> bytes:
     ws["A1"].font = Font(size=14, bold=True)
     ws.append([f"Haftalık {data['weekly_limit']} saati aşan çalışma fazla mesai sayılır (x{data['overtime_rate']})"])
     ws.append([])
-    headers = ["Personel", "Görev", "Saatlik ücret", "Vardiya", "Normal saat", "Fazla mesai saati", "Normal ücret", "Fazla mesai ücreti", "Toplam"]
+    headers = ["Personel", "Görev", "Saatlik ücret", "Vardiya", "Normal saat", "Fazla mesai saati", "Normal ücret", "Fazla mesai ücreti", "Brüt toplam", "Avans", "Net ödenecek", "İzin günü"]
     ws.append(headers)
     for cell in ws[ws.max_row]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F2937")
-    money_cols = {3, 7, 8, 9}
+    money_cols = {3, 7, 8, 9, 10, 11}
     for r in data["rows"]:
-        ws.append([r["name"], r["task"], r["hourly_wage"], r["shift_count"], r["regular_hours"], r["overtime_hours"], r["regular_pay"], r["overtime_pay"], r["total_pay"]])
+        ws.append([r["name"], r["task"], r["hourly_wage"], r["shift_count"], r["regular_hours"], r["overtime_hours"], r["regular_pay"], r["overtime_pay"], r["total_pay"], r["advance_total"], r["net_pay"], r["leave_days"]])
         for c in money_cols:
             ws.cell(ws.max_row, c).number_format = '#,##0.00 "₺"'
     t = data["totals"]
-    ws.append(["TOPLAM", "", "", "", t["regular_hours"], t["overtime_hours"], t["regular_pay"], t["overtime_pay"], t["total_pay"]])
-    for c in range(1, 10):
+    ws.append(["TOPLAM", "", "", "", t["regular_hours"], t["overtime_hours"], t["regular_pay"], t["overtime_pay"], t["total_pay"], t["advance_total"], t["net_pay"], t["leave_days"]])
+    for c in range(1, 13):
         ws.cell(ws.max_row, c).font = Font(bold=True)
     for c in money_cols:
         ws.cell(ws.max_row, c).number_format = '#,##0.00 "₺"'
-    for col, width in zip(range(1, 10), [22, 16, 14, 10, 13, 17, 15, 18, 15]):
+    for col, width in zip(range(1, 13), [22, 16, 14, 10, 13, 17, 15, 18, 15, 13, 15, 10]):
         ws.column_dimensions[get_column_letter(col)].width = width
     detail = wb.create_sheet("Vardiya Detayı")
     detail.append(["Personel", "Tarih", "Başlangıç", "Bitiş", "Saat", "Fazla mesai saati", "Görev"])
@@ -164,6 +164,17 @@ def build_payroll_excel(data: dict) -> bytes:
             detail.append([r["name"], datetime.fromisoformat(sh["date"]).strftime("%d.%m.%Y"), sh["start"], sh["end"], sh["hours"], sh["overtime"], sh.get("task", "")])
     for col, width in zip(range(1, 8), [22, 13, 11, 11, 9, 17, 18]):
         detail.column_dimensions[get_column_letter(col)].width = width
+    adv = wb.create_sheet("Avanslar")
+    adv.append(["Personel", "Tarih", "Tutar", "Not"])
+    for cell in adv[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1F2937")
+    for r in data["rows"]:
+        for a in r["advances"]:
+            adv.append([r["name"], datetime.fromisoformat(a["date"]).strftime("%d.%m.%Y"), a["amount"], a.get("note", "")])
+            adv.cell(adv.max_row, 3).number_format = '#,##0.00 "₺"'
+    for col, width in zip(range(1, 5), [22, 13, 14, 30]):
+        adv.column_dimensions[get_column_letter(col)].width = width
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()

@@ -15,7 +15,8 @@ const orderText = (group) => [
   "Teşekkürler.",
 ].join("\n");
 
-const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast.success("Sipariş listesi kopyalandı"); } catch { toast.error("Kopyalanamadı"); } };
+const saveOrder = (group, channel) => axios.post(`${API}/orders`, { supplier: group.supplier, phone: group.phone || "", channel, estimated_total: group.estimated_total, items: group.items.map((i) => ({ inventory_id: i.inventory_id, name: i.name, unit: i.unit, quantity: i.suggested, unit_price: i.unit_price || 0 })) }).then(() => toast.success("Sipariş geçmişe kaydedildi")).catch(() => toast.error("Sipariş geçmişe kaydedilemedi"));
+const copy = async (text, group) => { try { await navigator.clipboard.writeText(text); toast.success("Sipariş listesi kopyalandı"); saveOrder(group, "Kopyalandı"); } catch { toast.error("Kopyalanamadı"); } };
 
 export const OrderList = ({ refreshKey }) => {
   const [groups, setGroups] = useState([]);
@@ -39,8 +40,8 @@ export const OrderList = ({ refreshKey }) => {
               </div>
             ))}
             <div className="order-actions">
-              <button className="secondary-button" data-testid={`order-copy-${gi}`} onClick={() => copy(orderText(g))}><Copy size={14} /> Kopyala</button>
-              <a className="secondary-button" data-testid={`order-whatsapp-${gi}`} href={`https://wa.me/${waPhone(g.phone)}?text=${encodeURIComponent(orderText(g))}`} target="_blank" rel="noreferrer"><MessageCircle size={14} /> {g.phone ? "WhatsApp'ta gönder" : "WhatsApp"}</a>
+              <button className="secondary-button" data-testid={`order-copy-${gi}`} onClick={() => copy(orderText(g), g)}><Copy size={14} /> Kopyala</button>
+              <a className="secondary-button" data-testid={`order-whatsapp-${gi}`} href={`https://wa.me/${waPhone(g.phone)}?text=${encodeURIComponent(orderText(g))}`} target="_blank" rel="noreferrer" onClick={() => saveOrder(g, "WhatsApp")}><MessageCircle size={14} /> {g.phone ? "WhatsApp'ta gönder" : "WhatsApp"}</a>
             </div>
           </article>
         ))}

@@ -69,6 +69,36 @@ class ShiftEntry(Entry):
     end: str = Field(default="17:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     task: str = ""
 
+DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+LEAVE_TYPES = ("Yıllık izin", "Raporlu", "Mazeret izni", "Ücretsiz izin", "Haftalık izin")
+
+class LeaveEntry(Entry):
+    staff_id: str = Field(min_length=1)
+    date: str = Field(pattern=DATE_PATTERN)
+    type: str = Field(default="Yıllık izin", pattern="^(" + "|".join(LEAVE_TYPES) + ")$")
+    note: str = ""
+
+class AdvanceEntry(Entry):
+    staff_id: str = Field(min_length=1)
+    date: str = Field(pattern=DATE_PATTERN)
+    amount: float = Field(gt=0)
+    note: str = ""
+
+class OrderItem(BaseModel):
+    inventory_id: str = ""
+    name: str
+    unit: str = ""
+    quantity: float = 0
+    unit_price: float = 0
+
+class OrderEntry(Entry):
+    supplier: str
+    phone: str = ""
+    channel: str = "WhatsApp"
+    items: List[OrderItem] = []
+    estimated_total: float = 0
+    status: str = "Gönderildi"
+
 class SupplierEntry(Entry):
     name: str
     phone: str = ""
@@ -90,6 +120,7 @@ class StaffEntry(Entry):
     status: str = "Bekliyor"
     hourly_wage: float = 0
     phone: str = ""
+    annual_leave_days: float = 14
 
 class CashEntry(Entry):
     opening: float = 0
@@ -110,7 +141,7 @@ class ProductEntry(Entry):
     cost_from_recipe: bool = False
     target_margin: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry}
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -132,6 +163,8 @@ async def dashboard():
     cash = await list_items("cash")
     products = await list_items("products", limit=None)
     suppliers = await list_items("suppliers", limit=None)
+    leaves = await db.leaves.find({}, {"_id": 0}).sort("date", 1).to_list(None)
+    advances = await db.advances.find({}, {"_id": 0}).sort("date", -1).to_list(None)
     shifts = await db.shifts.find({}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
@@ -143,7 +176,7 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -523,6 +556,9 @@ async def build_payroll(month: str) -> Dict[str, Any]:
     span_start, span_end = first - timedelta(days=first.weekday()), nxt + timedelta(days=6)
     shifts = await db.shifts.find({"date": {"$gte": span_start.isoformat(), "$lt": span_end.isoformat()}}, {"_id": 0}).to_list(None)
     split = split_overtime(shifts)
+    month_range = {"$gte": first.isoformat(), "$lt": nxt.isoformat()}
+    leaves = await db.leaves.find({"date": month_range}, {"_id": 0}).to_list(None)
+    advances = await db.advances.find({"date": month_range}, {"_id": 0}).sort("date", 1).to_list(None)
     rows = []
     for person in await list_items("staff", limit=None):
         wage = float(person.get("hourly_wage", 0))
@@ -533,7 +569,12 @@ async def build_payroll(month: str) -> Dict[str, Any]:
                      "regular_hours": round(regular, 2), "overtime_hours": round(overtime, 2), "regular_pay": round(regular * wage, 2),
                      "overtime_pay": round(overtime * wage * OVERTIME_RATE, 2), "total_pay": round(regular * wage + overtime * wage * OVERTIME_RATE, 2),
                      "shifts": sorted([{**s, "hours": round(shift_hours(s), 2), "overtime": round(split[s["id"]][1], 2)} for s in mine], key=lambda x: (x["date"], x["start"]))})
-    totals = {k: round(sum(r[k] for r in rows), 2) for k in ("regular_hours", "overtime_hours", "regular_pay", "overtime_pay", "total_pay")}
+        row = rows[-1]
+        row["leave_days"] = sum(1 for x in leaves if x["staff_id"] == person["id"])
+        row["advances"] = [a for a in advances if a["staff_id"] == person["id"]]
+        row["advance_total"] = round(sum(float(a["amount"]) for a in row["advances"]), 2)
+        row["net_pay"] = round(row["total_pay"] - row["advance_total"], 2)
+    totals = {k: round(sum(r[k] for r in rows), 2) for k in ("regular_hours", "overtime_hours", "regular_pay", "overtime_pay", "total_pay", "advance_total", "net_pay", "leave_days")}
     return {"month": month, "weekly_limit": WEEKLY_LIMIT, "overtime_rate": OVERTIME_RATE, "rows": rows, "totals": totals}
 
 MONTH = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -615,7 +656,8 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "expenses" and old.get("purchases"):
             await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
         if name == "staff":
-            await db.shifts.delete_many({"staff_id": item_id})
+            for related in ("shifts", "leaves", "advances"):
+                await db[related].delete_many({"staff_id": item_id})
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
             await recompute_product_costs()
