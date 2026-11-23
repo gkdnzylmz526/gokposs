@@ -88,6 +88,7 @@ class StaffEntry(Entry):
     shift: str = "09:00 – 17:00"
     task: str = ""
     status: str = "Bekliyor"
+    hourly_wage: float = 0
 
 class CashEntry(Entry):
     opening: float = 0
@@ -438,6 +439,50 @@ async def supplier_spending(months: int = Query(6, ge=1, le=24)):
         row["total"] = round(row["total"] + float(exp.get("amount", 0)), 2)
         row["count"] += 1
     return {"months": keys, "rows": sorted(rows.values(), key=lambda r: -r["total"])}
+
+class CopyWeekRequest(BaseModel):
+    from_start: date_cls
+    to_start: date_cls
+
+@api.post("/shifts/copy-week")
+async def copy_week(req: CopyWeekRequest):
+    source_days = [(req.from_start + timedelta(days=i)).isoformat() for i in range(7)]
+    offset = req.to_start - req.from_start
+    source = await db.shifts.find({"date": {"$in": source_days}}, {"_id": 0}).to_list(None)
+    staff_ids = {x["id"] for x in await list_items("staff", limit=None)}
+    target_days = [(req.to_start + timedelta(days=i)).isoformat() for i in range(7)]
+    existing = {(x["staff_id"], x["date"], x["start"]) for x in await db.shifts.find({"date": {"$in": target_days}}, {"_id": 0}).to_list(None)}
+    created = 0
+    for shift in source:
+        new_date = (date_cls.fromisoformat(shift["date"]) + offset).isoformat()
+        if shift["staff_id"] not in staff_ids or (shift["staff_id"], new_date, shift["start"]) in existing:
+            continue
+        doc = ShiftEntry(staff_id=shift["staff_id"], date=new_date, start=shift["start"], end=shift["end"], task=shift.get("task", "")).model_dump()
+        await db.shifts.insert_one({**doc})
+        created += 1
+    return {"created": created, "source_count": len(source)}
+
+@api.get("/inventory/{item_id}/prices")
+async def ingredient_prices(item_id: str):
+    item = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Malzeme bulunamadı")
+    history = []
+    async for exp in db.expenses.find({"purchases.inventory_id": item_id}, {"_id": 0}).sort("created_at", 1):
+        for p in exp.get("purchases", []):
+            if p["inventory_id"] == item_id and float(p.get("unit_price", 0)) > 0:
+                history.append({"date": exp["created_at"], "unit_price": float(p["unit_price"]), "quantity": float(p["quantity"]),
+                                "supplier": exp.get("supplier") or item.get("supplier") or "Tedarikçi belirtilmemiş"})
+    suppliers: Dict[str, Dict[str, Any]] = {}
+    for h in history:
+        row = suppliers.setdefault(h["supplier"], {"supplier": h["supplier"], "prices": [], "quantity": 0})
+        row["prices"].append(h["unit_price"])
+        row["quantity"] += h["quantity"]
+        row["last_price"], row["last_date"] = h["unit_price"], h["date"]
+    comparison = [{"supplier": r["supplier"], "last_price": r["last_price"], "last_date": r["last_date"], "min_price": min(r["prices"]), "avg_price": round(sum(r["prices"]) / len(r["prices"]), 2),
+                   "purchases": len(r["prices"]), "quantity": round(r["quantity"], 3)} for r in suppliers.values()]
+    comparison.sort(key=lambda r: r["last_price"])
+    return {"item": {"id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "unit_cost": item.get("unit_cost", 0)}, "history": history, "comparison": comparison}
 
 def _purchase_total(doc: Dict[str, Any]) -> None:
     if doc.get("purchases") and not float(doc.get("amount", 0)):
