@@ -15,3 +15,11 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: monthly-summary
+    description: "Emails last month's revenue, payroll and top sellers on the 1st of each month at 09:00 Istanbul time"
+    cron: "0 9 1 * *"
+    timezone: "Europe/Istanbul"
+    endpoint: "{{BASE_URL}}/api/cron/monthly-summary"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

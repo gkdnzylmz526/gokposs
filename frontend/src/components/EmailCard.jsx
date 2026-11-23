@@ -20,7 +20,7 @@ export const EmailCard = () => {
   return (
     <section className="panel email-card" data-testid="email-card">
       <div className="panel-head">
-        <div><h3>Otomatik e-postalar</h3><span className="muted">Gün sonu: {status?.schedule || "Her gece 23:59"} · Haftalık özet: {status?.weekly_schedule || "Her pazartesi 09:00"} · {status?.recipient || "—"}</span></div>
+        <div><h3>Otomatik e-postalar</h3><span className="muted">Gün sonu: {status?.schedule || "Her gece 23:59"} · Haftalık özet: {status?.weekly_schedule || "Her pazartesi 09:00"} · Aylık özet: {status?.monthly_schedule || "Her ayın 1'i 09:00"} · {status?.recipient || "—"}</span></div>
         <Mail size={20} className="panel-icon" />
       </div>
       <div className="email-row">
@@ -28,9 +28,9 @@ export const EmailCard = () => {
           {!status?.configured && <b className="danger-text">Gmail bilgileri henüz eklenmedi</b>}
           {status?.configured && !last && <b>Henüz gönderim yok</b>}
           {status?.configured && last && <b className={last.status === "sent" ? "green-text" : "danger-text"}>Son gönderim: {last.status === "sent" ? "Başarılı" : "Başarısız"}</b>}
-          {last && <small>{new Date(last.created_at).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })} · {last.kind === "weekly" ? "Haftalık özet" : "Gün sonu"} · {last.trigger === "cron" ? "Otomatik" : "Manuel"}</small>}
+          {last && <small>{new Date(last.created_at).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })} · {{ weekly: "Haftalık özet", monthly: "Aylık özet", leave_request: "İzin talebi bildirimi" }[last.kind] || "Gün sonu"} · {last.trigger === "cron" ? "Otomatik" : "Manuel"}</small>}
         </div>
-        <div className="email-buttons"><button className="secondary-button" data-testid="email-send-now-button" disabled={!!sending} onClick={() => sendNow("daily")}><Send size={15} /> {sending === "daily" ? "Gönderiliyor…" : "Gün sonunu gönder"}</button><button className="secondary-button" data-testid="email-send-weekly-button" disabled={!!sending} onClick={() => sendNow("weekly")}><Send size={15} /> {sending === "weekly" ? "Gönderiliyor…" : "Haftalık özeti gönder"}</button></div>
+        <div className="email-buttons"><button className="secondary-button" data-testid="email-send-now-button" disabled={!!sending} onClick={() => sendNow("daily")}><Send size={15} /> {sending === "daily" ? "Gönderiliyor…" : "Gün sonunu gönder"}</button><button className="secondary-button" data-testid="email-send-monthly-button" disabled={!!sending} onClick={() => sendNow("monthly")}><Send size={15} /> {sending === "monthly" ? "Gönderiliyor…" : "Aylık özeti gönder"}</button><button className="secondary-button" data-testid="email-send-weekly-button" disabled={!!sending} onClick={() => sendNow("weekly")}><Send size={15} /> {sending === "weekly" ? "Gönderiliyor…" : "Haftalık özeti gönder"}</button></div>
       </div>
     </section>
   );

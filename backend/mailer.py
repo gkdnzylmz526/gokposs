@@ -54,3 +54,35 @@ def send_weekly_email(report: dict, label: str) -> None:
         f"Toplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])} (%{margin})\nSatış işlemi: {report['sales_count']}\n\n"
         "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi haftalar,\nGÖKBOSS POS",
     )
+
+
+MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+
+
+def send_monthly_email(report: dict, payroll: dict, month: str) -> None:
+    y, m = month.split("-")
+    label = f"{MONTHS[int(m) - 1]} {y}"
+    top = report["top_products"][:5]
+    lines = [f"{i + 1}. {p['product_name']} — {qty(p['quantity'])} adet · ciro {tl(p['revenue'])}" for i, p in enumerate(top)] or ["Bu ay satış yok."]
+    t = payroll["totals"]
+    net_after_payroll = report["profit"] - t["total_pay"]
+    _send(
+        f"GÖKBOSS POS — Aylık özet {label}",
+        f"Merhaba,\n\n{label} özeti:\n\n"
+        f"Toplam gelir: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nBrüt kâr: {tl(report['profit'])}\nSatış işlemi: {report['sales_count']}\n\n"
+        f"Bordro (brüt): {tl(t['total_pay'])} · fazla mesai {qty(t['overtime_hours'])} saat · avans {tl(t['advance_total'])}\n"
+        f"Bordro sonrası kâr (tahmini): {tl(net_after_payroll)}\n\n"
+        "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi çalışmalar,\nGÖKBOSS POS",
+    )
+
+
+def send_leave_request_email(staff_name: str, doc: dict) -> None:
+    def d(v):
+        y, m, day = v.split("-")
+        return f"{day}.{m}.{y}"
+    period = d(doc["start"]) if doc["start"] == doc["end"] else f"{d(doc['start'])} – {d(doc['end'])}"
+    _send(
+        f"GÖKBOSS POS — Yeni izin talebi: {staff_name}",
+        f"Merhaba,\n\n{staff_name} yeni bir izin talebi gönderdi.\n\nTarih: {period} ({doc['days']} gün)\nTür: {doc['type']}\n"
+        f"Not: {doc.get('note') or '—'}\n\nOnaylamak veya reddetmek için GÖKBOSS POS > Ekip & Vardiya > İzin talepleri bölümüne gidin.\n\nGÖKBOSS POS",
+    )

@@ -14,13 +14,13 @@ from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
 from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
-from mailer import send_report_email, send_weekly_email
+from mailer import send_leave_request_email, send_monthly_email, send_report_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -29,7 +29,62 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 db = client[os.environ["DB_NAME"]]
-api = APIRouter(prefix="/api")
+try:  # launched as `backend.server` (the default)
+    from backend.clerk_auth import clerk_router, require_user
+except ModuleNotFoundError:  # launched from inside backend/ as `server`
+    from clerk_auth import clerk_router, require_user
+import requests as http_requests
+from pymongo import ReturnDocument as _RD
+
+# The role list is code, so every publish ships it to Live. Highest first; keep `admin`.
+ROLES = ["admin", "member"]
+DEFAULT_ROLE = "member"
+RETIRED_ROLES: Dict[str, str] = {}
+RANK = {r: len(ROLES) - i for i, r in enumerate(ROLES)}
+ENV = "live" if os.environ.get("CLERK_PUBLISHABLE_KEY", "").startswith("pk_live_") else "preview"
+IN_ENV = {"env": {"$in": [ENV, None]}}
+PUBLIC_PREFIXES = ("/api/public/", "/api/cron/")
+
+def effective_role(role) -> str:
+    role = RETIRED_ROLES.get(role, role)
+    return role if role in ROLES else DEFAULT_ROLE
+
+def _clerk_user(user_id: str) -> Dict[str, Any]:
+    r = http_requests.get(f"https://api.clerk.com/v1/users/{user_id}", timeout=10,
+                          headers={"Authorization": f"Bearer {os.environ['CLERK_SECRET_KEY']}", "User-Agent": "emergent-app"})
+    r.raise_for_status()
+    return r.json()
+
+def _is_admin_email(info: Dict[str, Any]) -> bool:
+    admins = {e.strip().lower() for e in os.environ.get("ADMIN_EMAIL", "").split(",") if e.strip()}
+    return any(e["email_address"].lower() in admins and (e.get("verification") or {}).get("status") == "verified" for e in info["email_addresses"])
+
+async def current_member(request: Request) -> Dict[str, Any]:
+    user = require_user(request)
+    uid = user["user_id"]
+    member = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if member is None or not member.get("role"):
+        info = await asyncio.to_thread(_clerk_user, uid)
+        role = "admin" if _is_admin_email(info) else DEFAULT_ROLE
+        email = next((e["email_address"] for e in info["email_addresses"] if e["id"] == info.get("primary_email_address_id")), "")
+        await db.users.update_one({"user_id": uid, "role": {"$in": [None, ""]}}, {"$set": {"role": role}})
+        member = await db.users.find_one_and_update({"user_id": uid}, {"$setOnInsert": {"user_id": uid, "role": role, "email": email, "created_at": datetime.now(timezone.utc).isoformat()}},
+                                                    upsert=True, projection={"_id": 0}, return_document=_RD.AFTER)
+    if member.get("env") != ENV:
+        await db.users.update_one({"user_id": uid}, {"$set": {"env": ENV}})
+    return {**member, "env": ENV, "role": effective_role(member["role"])}
+
+async def dashboard_guard(request: Request) -> None:
+    """Every /api route except the staff leave link and cron webhooks is admin-only."""
+    if request.url.path.startswith(PUBLIC_PREFIXES):
+        return
+    if request.url.path in ("/api/me",):
+        return
+    member = await current_member(request)
+    if member["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Bu panele erişim yetkiniz yok")
+
+api = APIRouter(prefix="/api", dependencies=[Depends(dashboard_guard)])
 TZ = ZoneInfo("Europe/Istanbul")
 
 def local_day(value: str) -> str:
@@ -267,6 +322,22 @@ async def send_weekly_summary(trigger: str, key: str | None = None) -> Dict[str,
         await asyncio.to_thread(send_weekly_email, report, f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}")
     return await _deliver("weekly", trigger, key, job)
 
+async def send_monthly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
+    async def job(day):
+        first_this = datetime.now(TZ).date().replace(day=1)
+        last = first_this - timedelta(days=1)
+        first = last.replace(day=1)
+        report = await build_report("custom", first.isoformat(), last.isoformat())
+        pay = await build_payroll(first.strftime("%Y-%m"))
+        await asyncio.to_thread(send_monthly_email, report, pay, first.strftime("%Y-%m"))
+    return await _deliver("monthly", trigger, key, job)
+
+async def notify_leave_request(staff_name: str, doc: Dict[str, Any]) -> None:
+    async def job(day):
+        await asyncio.to_thread(send_leave_request_email, staff_name, doc)
+    if os.environ.get("GMAIL_USERNAME") and os.environ.get("GMAIL_APP_PASSWORD"):
+        await _deliver("leave_request", "auto", doc["id"], job)
+
 async def accept_cron(request: Request) -> str | None:
     secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
     auth = request.headers.get("authorization", "")
@@ -302,9 +373,44 @@ async def cron_weekly_summary(request: Request, background: BackgroundTasks):
     background.add_task(send_weekly_summary, "cron", run_id)
     return {"status": "accepted"}
 
+@api.get("/me")
+async def me(request: Request):
+    member = await current_member(request)
+    return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"]}
+
+@api.get("/users")
+async def list_users():
+    people = await db.users.find(IN_ENV, {"_id": 0}).to_list(1000)
+    return {"roles": ROLES, "users": [{**p, "role": effective_role(p.get("role"))} for p in people]}
+
+class RoleIn(BaseModel):
+    role: str
+
+@api.patch("/users/{user_id}/role")
+async def set_role(user_id: str, body: RoleIn):
+    if body.role not in ROLES:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    target = await db.users.find_one({"user_id": user_id, **IN_ENV}, {"_id": 0})
+    if target is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    if (effective_role(target.get("role")) == "admin" and body.role != "admin"
+            and await db.users.count_documents({"role": "admin", **IN_ENV}) <= 1):
+        raise HTTPException(status_code=409, detail="En az bir yönetici kalmalı")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"role": body.role}})
+    return {"user_id": user_id, "role": body.role}
+
+@api.post("/cron/monthly-summary")
+async def cron_monthly_summary(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    run_id = await accept_cron(request)
+    if not run_id:
+        return {"status": "duplicate"}
+    background.add_task(send_monthly_summary, "cron", run_id)
+    return {"status": "accepted"}
+
 @api.post("/email/send-now")
-async def email_send_now(kind: str = Query("daily", pattern="^(daily|weekly)$")):
-    record = await (send_weekly_summary if kind == "weekly" else send_daily_report)("manual")
+async def email_send_now(kind: str = Query("daily", pattern="^(daily|weekly|monthly)$")):
+    record = await {"weekly": send_weekly_summary, "monthly": send_monthly_summary, "daily": send_daily_report}[kind]("manual")
     if record["status"] != "sent":
         return {"status": "failed", "detail": "E-posta gönderilemedi. Gmail bilgilerini kontrol edin."}
     return {"status": "sent", "recipient": record["recipient"]}
@@ -312,7 +418,7 @@ async def email_send_now(kind: str = Query("daily", pattern="^(daily|weekly)$"))
 @api.get("/email/status")
 async def email_status():
     last = await db.report_deliveries.find({}, {"_id": 0}).sort("created_at", -1).to_list(5)
-    return {"recipient": os.environ.get("REPORT_RECIPIENT", ""), "configured": bool(os.environ.get("GMAIL_USERNAME") and os.environ.get("GMAIL_APP_PASSWORD")), "schedule": "Her gece 23:59", "weekly_schedule": "Her pazartesi 09:00", "history": last}
+    return {"recipient": os.environ.get("REPORT_RECIPIENT", ""), "configured": bool(os.environ.get("GMAIL_USERNAME") and os.environ.get("GMAIL_APP_PASSWORD")), "schedule": "Her gece 23:59", "weekly_schedule": "Her pazartesi 09:00", "monthly_schedule": "Her ayın 1'i 09:00", "history": last}
 
 @api.get("/cash/reconciliation")
 async def cash_reconciliation(date: str | None = None):
@@ -651,7 +757,7 @@ async def public_leave_info(token: str):
     return {"name": staff["name"], "balance": leave_balance(staff, leaves), "requests": requests, "types": LEAVE_TYPES}
 
 @api.post("/public/leave/{token}")
-async def public_leave_request(token: str, body: LeaveRequestIn):
+async def public_leave_request(token: str, body: LeaveRequestIn, background: BackgroundTasks):
     staff = await staff_by_token(token)
     if body.end < body.start:
         raise HTTPException(status_code=422, detail="Bitiş tarihi başlangıçtan önce olamaz")
@@ -664,6 +770,7 @@ async def public_leave_request(token: str, body: LeaveRequestIn):
     doc = {"id": str(uuid.uuid4()), "staff_id": staff["id"], "start": body.start.isoformat(), "end": body.end.isoformat(), "days": (body.end - body.start).days + 1,
            "type": body.type, "note": body.note, "status": "Bekliyor", "created_at": datetime.now(timezone.utc).isoformat()}
     await db.leave_requests.insert_one({**doc})
+    background.add_task(notify_leave_request, staff["name"], doc)
     return {k: v for k, v in doc.items() if k != "staff_id"}
 
 @api.post("/staff/{staff_id}/request-link")
@@ -782,6 +889,7 @@ for collection_name, collection_model in COLLECTIONS.items():
 
 app = FastAPI(title="GÖKBOSS POS API")
 app.include_router(api)
+app.include_router(clerk_router)  # /api/clerk/config and /api/__clerk/*
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("startup")
