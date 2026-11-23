@@ -24,7 +24,7 @@ export const AuthGate = ({ children }) => {
   }, [getToken]);
   if (!ready || !me) return <div className="auth-loading" data-testid="auth-loading">Yükleniyor…</div>;
   if (me.role === "admin") return children;
-  if (me.role === "staff") return <StaffApp />;
+  if (me.role === "staff") return <StaffApp me={me} />;
   if (me.role === "error") return <div className="auth-loading" data-testid="auth-error"><div style={{ textAlign: "center" }}><p>Bağlantı kurulamadı. Lütfen tekrar deneyin.</p><button className="primary-button" data-testid="auth-retry" onClick={() => window.location.reload()}>Tekrar dene</button></div></div>;
   return (
     <div className="public-page" data-testid="access-denied">

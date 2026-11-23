@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Toaster, toast } from "sonner";
 import { UserButton } from "@clerk/react";
-import { Boxes, Minus, Plus, ReceiptText, Save } from "lucide-react";
+import { Armchair, Boxes, Minus, Plus, ReceiptText, Save } from "lucide-react";
+import { TablesBoard } from "@/components/Tables";
+import { ClockCard } from "@/components/Workforce";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -59,20 +61,22 @@ function StockCount({ inventory, onSaved }) {
   );
 }
 
-export default function StaffApp() {
-  const [tab, setTab] = useState("sales");
+export default function StaffApp({ me }) {
+  const [tab, setTab] = useState("tables");
   const [data, setData] = useState({ products: [], inventory: [], my_today: [] });
   const load = () => axios.get(`${API}/staff-view`).then(({ data: d }) => setData(d)).catch(() => toast.error("Veriler yüklenemedi"));
   useEffect(() => { load(); }, []);
   return (
     <div className="staff-app" data-testid="staff-app">
       <Toaster position="top-center" richColors />
-      <header className="staff-header"><div className="brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span>Personel</span></div></div><UserButton /></header>
+      <header className="staff-header"><div className="brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span data-testid="staff-restaurant-name">{(me?.restaurant_name || "Personel").toLocaleUpperCase("tr-TR")}</span></div></div><UserButton /></header>
+      <div className="staff-clock-wrap"><ClockCard /></div>
       <nav className="staff-tabs">
+        <button className={tab === "tables" ? "active" : ""} data-testid="staff-tab-tables" onClick={() => setTab("tables")}><Armchair size={16} /> Masalar</button>
         <button className={tab === "sales" ? "active" : ""} data-testid="staff-tab-sales" onClick={() => setTab("sales")}><ReceiptText size={16} /> Satış gir</button>
         <button className={tab === "stock" ? "active" : ""} data-testid="staff-tab-stock" onClick={() => setTab("stock")}><Boxes size={16} /> Stok sayımı</button>
       </nav>
-      <main className="staff-main">{tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
+      <main className="staff-main">{tab === "tables" ? <TablesBoard refreshKey={data} /> : tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
     </div>
   );
 }

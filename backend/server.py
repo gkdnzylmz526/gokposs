@@ -28,7 +28,8 @@ from pydantic import BaseModel, Field
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
-db = client[os.environ["DB_NAME"]]
+from scope import DEFAULT_RESTAURANT, RESTAURANT_IDS, RESTAURANT_NAMES, RESTAURANTS, SCOPED, ScopedDB, current_rid, specific_rid
+db = ScopedDB(client[os.environ["DB_NAME"]])
 try:  # launched as `backend.server` (the default)
     from backend.clerk_auth import clerk_router, require_user
 except ModuleNotFoundError:  # launched from inside backend/ as `server`
@@ -74,7 +75,9 @@ async def current_member(request: Request) -> Dict[str, Any]:
         await db.users.update_one({"user_id": uid}, {"$set": {"env": ENV}})
     return {**member, "env": ENV, "role": effective_role(member["role"])}
 
-STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count")]
+STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
+                ("POST", r"/api/tables/[\w-]+/(items|close|cancel)"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
+ALL_MODE_WRITES = ("/api/products", "/api/suppliers", "/api/users", "/api/email", "/api/price-alerts", "/api/leave-requests", "/api/staff/")
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -96,7 +99,7 @@ def _label(collection: str, doc: Dict[str, Any] | None) -> str:
 async def audit(request: Request, action: str, collection: str, item_id: str, doc: Dict[str, Any] | None = None, detail: str = "") -> None:
     member = getattr(request.state, "member", None) or {}
     await db.audit_logs.insert_one({"id": str(uuid.uuid4()), "user_id": member.get("user_id", ""), "user_email": member.get("email", ""), "role": member.get("role", ""),
-                                    "action": action, "collection": collection, "item_id": item_id, "summary": detail or _label(collection, doc),
+                                    "restaurant_id": current_rid.get() or "", "action": action, "collection": collection, "item_id": item_id, "summary": detail or _label(collection, doc),
                                     "created_at": datetime.now(timezone.utc).isoformat()})
 
 async def dashboard_guard(request: Request) -> None:
@@ -108,9 +111,16 @@ async def dashboard_guard(request: Request) -> None:
     member = await current_member(request)
     request.state.member = member
     if member["role"] == "staff" and staff_allowed(request.method, request.url.path):
+        current_rid.set(member.get("restaurant_id") or DEFAULT_RESTAURANT)
         return
     if member["role"] != "admin":
         raise HTTPException(status_code=403, detail="Bu panele erişim yetkiniz yok")
+    rid = request.headers.get("x-restaurant") or DEFAULT_RESTAURANT
+    if rid not in RESTAURANT_IDS and rid != "all":
+        raise HTTPException(status_code=400, detail="Geçersiz restoran")
+    if rid == "all" and request.method != "GET" and not request.url.path.startswith(ALL_MODE_WRITES):
+        raise HTTPException(status_code=400, detail="Bu işlem için üstten bir restoran seçin")
+    current_rid.set(rid)
 
 api = APIRouter(prefix="/api", dependencies=[Depends(dashboard_guard)])
 TZ = ZoneInfo("Europe/Istanbul")
@@ -235,6 +245,22 @@ class ProductEntry(Entry):
     cost_from_recipe: bool = False
     target_margin: float = 0
 
+class TableEntry(Entry):
+    name: str = Field(min_length=1)
+    seats: int = Field(default=4, ge=1)
+
+class TipEntry(Entry):
+    date: str = Field(pattern=DATE_PATTERN)
+    amount: float = Field(gt=0)
+    note: str = ""
+
+class AttendanceEntry(Entry):
+    staff_id: str = Field(min_length=1)
+    date: str = Field(pattern=DATE_PATTERN)
+    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="", pattern=r"^(([01]\d|2[0-3]):[0-5]\d)?$")
+    note: str = ""
+
 class WasteEntry(Entry):
     inventory_name: str = Field(min_length=1)
     quantity: float = Field(gt=0)
@@ -244,7 +270,7 @@ class WasteEntry(Entry):
     unit: str = ""
     cost: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry, "waste": WasteEntry}
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry, "waste": WasteEntry, "tables": TableEntry, "tips": TipEntry, "attendance": AttendanceEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -281,7 +307,10 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests, "waste": waste}
+    all_inventory = await db.raw.inventory.find({}, {"_id": 0, "id": 1, "name": 1, "unit": 1, "unit_cost": 1, "restaurant_id": 1, "created_at": 1}).sort("created_at", 1).to_list(None)
+    extra = {"all_inventory": all_inventory, "tables": await db.tables.find({}, {"_id": 0}).sort("name", 1).to_list(None), "tips": await list_items("tips"),
+             "attendance": await list_items("attendance", limit=300), "restaurant_id": current_rid.get()}
+    return {**extra, "revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests, "waste": waste}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -417,7 +446,9 @@ async def cron_weekly_summary(request: Request, background: BackgroundTasks):
 @api.get("/me")
 async def me(request: Request):
     member = await current_member(request)
-    return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"]}
+    rid = member.get("restaurant_id") or DEFAULT_RESTAURANT
+    return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"], "restaurants": RESTAURANTS,
+            "restaurant_id": rid, "restaurant_name": RESTAURANT_NAMES[rid], "staff_id": member.get("staff_id", "")}
 
 @api.get("/users")
 async def list_users():
@@ -439,6 +470,22 @@ async def set_role(user_id: str, body: RoleIn):
         raise HTTPException(status_code=409, detail="En az bir yönetici kalmalı")
     await db.users.update_one({"user_id": user_id}, {"$set": {"role": body.role}})
     return {"user_id": user_id, "role": body.role}
+
+class AssignmentIn(BaseModel):
+    restaurant_id: str
+    staff_id: str = ""
+
+@api.patch("/users/{user_id}/assignment")
+async def set_assignment(user_id: str, body: AssignmentIn, request: Request):
+    if body.restaurant_id not in RESTAURANT_IDS:
+        raise HTTPException(status_code=422, detail="Geçersiz restoran")
+    if body.staff_id and not await db.raw.staff.find_one({"id": body.staff_id, "restaurant_id": body.restaurant_id}):
+        raise HTTPException(status_code=422, detail="Personel bu restorana ait değil")
+    result = await db.users.update_one({"user_id": user_id, **IN_ENV}, {"$set": {"restaurant_id": body.restaurant_id, "staff_id": body.staff_id}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Not found")
+    await audit(request, "Atadı", "users", user_id, detail=f"{RESTAURANT_NAMES[body.restaurant_id]}{' · personel bağlandı' if body.staff_id else ''}")
+    return {"user_id": user_id, **body.model_dump()}
 
 class CountIn(BaseModel):
     quantity: float = Field(ge=0)
@@ -464,12 +511,19 @@ async def public_menu():
     return {"name": "GÖKBOSS", "categories": [{"category": k, "items": v} for k, v in sorted(groups.items())]}
 
 async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
-    rec = await cash_reconciliation()
-    if rec["has_closing"]:
-        return None
-    async def job(day):
-        await asyncio.to_thread(send_cash_reminder_email, rec)
-    return await _deliver("cash_reminder", trigger, key, job)
+    last = None
+    for r in RESTAURANTS:
+        token = current_rid.set(r["id"])
+        try:
+            rec = await cash_reconciliation()
+        finally:
+            current_rid.reset(token)
+        if rec["has_closing"] or not rec["sales"]:
+            continue
+        async def job(day, rec=rec, name=r["name"]):
+            await asyncio.to_thread(send_cash_reminder_email, {**rec, "restaurant": name})
+        last = await _deliver("cash_reminder", trigger, f"{key}:{r['id']}" if key else r["id"], job)
+    return last
 
 @api.post("/cron/cash-reminder")
 async def cron_cash_reminder(request: Request, background: BackgroundTasks):
@@ -560,7 +614,12 @@ async def stock_moves(sale: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not product and key:
         product = next((p for p in await list_items("products", limit=None) if _tr_key(p["name"]) == key), None)
     if product and product.get("recipe"):
-        return [{"inventory_id": r["inventory_id"], "delta": -float(r["amount"]) * quantity} for r in product["recipe"]]
+        moves = []
+        for r in product["recipe"]:
+            item = await local_inventory(r["inventory_id"])
+            if item:
+                moves.append({"inventory_id": item["id"], "delta": -float(r["amount"]) * quantity})
+        return moves
     match = next((i for i in await list_items("inventory", limit=None) if key and _tr_key(i["name"]) == key), None)
     return [{"inventory_id": match["id"], "delta": -quantity}] if match else []
 
@@ -581,10 +640,36 @@ async def get_stock_movements(inventory_id: str | None = None):
     query = {"inventory_id": inventory_id} if inventory_id else {}
     return await db.stock_movements.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
+async def local_inventory(inventory_id: str) -> Dict[str, Any] | None:
+    """Recipes are shared; map a recipe ingredient to the same-named item of the current restaurant."""
+    item = await db.raw.inventory.find_one({"id": inventory_id}, {"_id": 0})
+    if not item:
+        return None
+    if item.get("restaurant_id") == current_rid.get():
+        return item
+    key = _tr_key(item["name"])
+    return next((i for i in await list_items("inventory", limit=None) if _tr_key(i["name"]) == key), None)
+
+async def average_prices() -> Dict[str, float]:
+    """Inventory id -> average unit cost of that ingredient name across all restaurants."""
+    inventory = await db.raw.inventory.find({}, {"_id": 0}).to_list(None)
+    by_name: Dict[str, List[float]] = {}
+    for i in inventory:
+        if float(i.get("unit_cost", 0)) > 0:
+            by_name.setdefault(_tr_key(i["name"]), []).append(float(i["unit_cost"]))
+    return {i["id"]: (lambda v: sum(v) / len(v) if v else 0)(by_name.get(_tr_key(i["name"]), [])) for i in inventory}
+
+async def local_cost(product: Dict[str, Any]) -> float:
+    cost = 0.0
+    for r in product.get("recipe", []):
+        item = await local_inventory(r["inventory_id"])
+        cost += float(r["amount"]) * float((item or {}).get("unit_cost", 0))
+    return round(cost, 2)
+
 async def with_recipe_cost(doc: Dict[str, Any]) -> Dict[str, Any]:
     if not doc.get("recipe"):
         return {**doc, "cost_from_recipe": False}
-    prices = {i["id"]: float(i.get("unit_cost", 0)) for i in await list_items("inventory", limit=None)}
+    prices = await average_prices()
     cost = sum(float(r["amount"]) * prices.get(r["inventory_id"], 0) for r in doc["recipe"])
     return {**doc, "cost": round(cost, 2), "cost_from_recipe": True}
 
@@ -789,7 +874,11 @@ async def build_payroll(month: str) -> Dict[str, Any]:
     first = date_cls.fromisoformat(f"{month}-01")
     nxt = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
     span_start, span_end = first - timedelta(days=first.weekday()), nxt + timedelta(days=6)
-    shifts = await db.shifts.find({"date": {"$gte": span_start.isoformat(), "$lt": span_end.isoformat()}}, {"_id": 0}).to_list(None)
+    span = {"date": {"$gte": span_start.isoformat(), "$lt": span_end.isoformat()}}
+    planned = await db.shifts.find(span, {"_id": 0}).to_list(None)
+    clocked = [a for a in await db.attendance.find(span, {"_id": 0}).to_list(None) if a.get("end")]
+    real_staff = {a["staff_id"] for a in clocked}
+    shifts = [s for s in planned if s["staff_id"] not in real_staff] + clocked
     split = split_overtime(shifts)
     month_range = {"$gte": first.isoformat(), "$lt": nxt.isoformat()}
     leaves = await db.leaves.find({"date": month_range}, {"_id": 0}).to_list(None)
@@ -805,6 +894,7 @@ async def build_payroll(month: str) -> Dict[str, Any]:
                      "overtime_pay": round(overtime * wage * OVERTIME_RATE, 2), "total_pay": round(regular * wage + overtime * wage * OVERTIME_RATE, 2),
                      "shifts": sorted([{**s, "hours": round(shift_hours(s), 2), "overtime": round(split[s["id"]][1], 2)} for s in mine], key=lambda x: (x["date"], x["start"]))})
         row = rows[-1]
+        row["hours_source"] = "Giriş-çıkış" if person["id"] in real_staff else "Vardiya planı"
         row["leave_days"] = sum(1 for x in leaves if x["staff_id"] == person["id"] and x.get("type") != "Haftalık izin")
         row["advances"] = [a for a in advances if a["staff_id"] == person["id"]]
         row["advance_total"] = round(sum(float(a["amount"]) for a in row["advances"]), 2)
@@ -829,9 +919,20 @@ def _purchase_total(doc: Dict[str, Any]) -> None:
         doc["amount"] = round(sum(float(p["quantity"]) * float(p.get("unit_price", 0)) for p in doc["purchases"]), 2)
 
 async def fill_sale_cost(doc: Dict[str, Any]) -> None:
-    if not doc.get("unit_cost") and doc.get("product_id"):
-        product = await db.products.find_one({"id": doc["product_id"]}, {"_id": 0, "cost": 1})
-        doc["unit_cost"] = float((product or {}).get("cost", 0))
+    product = await db.products.find_one({"id": doc["product_id"]}, {"_id": 0}) if doc.get("product_id") else None
+    if product and product.get("recipe"):
+        doc["unit_cost"] = await local_cost(product)
+    elif not doc.get("unit_cost") and product:
+        doc["unit_cost"] = float(product.get("cost", 0))
+
+async def insert_sale(doc: Dict[str, Any], request: Request) -> None:
+    specific_rid()
+    doc["created_by"] = getattr(request.state, "member", {}).get("email", "")
+    await fill_sale_cost(doc)
+    doc["stock_moves"] = await stock_moves(doc)
+    await apply_moves(doc["stock_moves"], 1, doc, "Satış")
+    await db.sales.insert_one({**doc})
+    await audit(request, "Ekledi", "sales", doc["id"], doc)
 
 async def remove_expense(expense_id: str) -> None:
     old = await db.expenses.find_one_and_delete({"id": expense_id}, {"_id": 0})
@@ -886,11 +987,11 @@ async def public_leave_request(token: str, body: LeaveRequestIn, background: Bac
         raise HTTPException(status_code=422, detail="Geçmiş tarihler için talep gönderilemez")
     if await db.leave_requests.count_documents({"staff_id": staff["id"], "status": "Bekliyor"}) >= 10:
         raise HTTPException(status_code=429, detail="Çok fazla bekleyen talebiniz var")
-    doc = {"id": str(uuid.uuid4()), "staff_id": staff["id"], "start": body.start.isoformat(), "end": body.end.isoformat(), "days": (body.end - body.start).days + 1,
+    doc = {"id": str(uuid.uuid4()), "restaurant_id": staff.get("restaurant_id") or DEFAULT_RESTAURANT, "staff_id": staff["id"], "start": body.start.isoformat(), "end": body.end.isoformat(), "days": (body.end - body.start).days + 1,
            "type": body.type, "note": body.note, "status": "Bekliyor", "created_at": datetime.now(timezone.utc).isoformat()}
     await db.leave_requests.insert_one({**doc})
     background.add_task(notify_leave_request, staff["name"], doc)
-    return {k: v for k, v in doc.items() if k != "staff_id"}
+    return {k: v for k, v in doc.items() if k not in ("staff_id", "restaurant_id")}
 
 @api.post("/staff/{staff_id}/request-link")
 async def staff_request_link(staff_id: str, regenerate: bool = False):
@@ -915,7 +1016,7 @@ async def decide_leave_request(request_id: str, decision: str, request: Request)
         day, end = date_cls.fromisoformat(req["start"]), date_cls.fromisoformat(req["end"])
         while day <= end:
             if not await db.leaves.find_one({"staff_id": req["staff_id"], "date": day.isoformat()}):
-                await db.leaves.insert_one({**LeaveEntry(staff_id=req["staff_id"], date=day.isoformat(), type=req["type"], note=req.get("note") or "İzin talebi").model_dump()})
+                await db.leaves.insert_one({**LeaveEntry(staff_id=req["staff_id"], date=day.isoformat(), type=req["type"], note=req.get("note") or "İzin talebi").model_dump(), "restaurant_id": req.get("restaurant_id") or DEFAULT_RESTAURANT})
                 created += 1
             day += timedelta(days=1)
     status = "Onaylandı" if decision == "approve" else "Reddedildi"
@@ -932,6 +1033,187 @@ async def payroll_slip(staff_id: str, month: str | None = MONTH):
     name = re.sub(r"[^A-Za-z0-9]+", "-", row["name"].translate(str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU"))).strip("-").lower() or "personel"
     return Response(build_payslip_pdf(row, data), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="bordro-{name}-{data["month"]}.pdf"'})
 
+def _now_hm() -> str:
+    return datetime.now(TZ).strftime("%H:%M")
+
+async def table_view_rows() -> List[Dict[str, Any]]:
+    tables = await db.tables.find({}, {"_id": 0}).sort("name", 1).to_list(None)
+    orders = {o["table_id"]: o for o in await db.table_orders.find({"status": "Açık"}, {"_id": 0}).to_list(None)}
+    return [{**t, "order": orders.get(t["id"])} for t in tables]
+
+@api.get("/tables-view")
+async def tables_view():
+    products = [{k: p.get(k) for k in ("id", "name", "category", "price", "active")} for p in await list_items("products", limit=None) if p.get("active", True)]
+    return {"tables": await table_view_rows(), "products": sorted(products, key=lambda p: (p["category"] or "", p["name"]))}
+
+class TableItemIn(BaseModel):
+    product_id: str
+    quantity: float
+
+class TableCloseIn(BaseModel):
+    payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Yemek kartı)$")
+    tip: float = Field(default=0, ge=0)
+
+async def _table(table_id: str) -> Dict[str, Any]:
+    table = await db.tables.find_one({"id": table_id}, {"_id": 0})
+    if not table:
+        raise HTTPException(status_code=404, detail="Masa bulunamadı")
+    return table
+
+@api.post("/tables/{table_id}/items")
+async def table_add_item(table_id: str, body: TableItemIn, request: Request):
+    table = await _table(table_id)
+    if not body.quantity:
+        raise HTTPException(status_code=422, detail="Miktar 0 olamaz")
+    product = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=422, detail="Menü ürünü bulunamadı")
+    order = await db.table_orders.find_one({"table_id": table_id, "status": "Açık"}, {"_id": 0})
+    if not order:
+        if body.quantity < 0:
+            raise HTTPException(status_code=422, detail="Masada açık hesap yok")
+        order = {"id": str(uuid.uuid4()), "table_id": table_id, "table_name": table["name"], "status": "Açık", "items": [], "total": 0,
+                 "opened_by": getattr(request.state, "member", {}).get("email", ""), "opened_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.table_orders.insert_one({**order})
+    items = order["items"]
+    row = next((i for i in items if i["product_id"] == product["id"]), None)
+    if row:
+        row["quantity"] = round(row["quantity"] + body.quantity, 3)
+    elif body.quantity > 0:
+        items.append({"product_id": product["id"], "product_name": product["name"], "unit_price": float(product.get("price", 0)), "quantity": body.quantity})
+    items = [i for i in items if i["quantity"] > 0]
+    total = round(sum(i["quantity"] * i["unit_price"] for i in items), 2)
+    await db.table_orders.update_one({"id": order["id"]}, {"$set": {"items": items, "total": total}})
+    return {**order, "items": items, "total": total}
+
+@api.post("/tables/{table_id}/close")
+async def table_close(table_id: str, body: TableCloseIn, request: Request):
+    table = await _table(table_id)
+    order = await db.table_orders.find_one_and_update({"table_id": table_id, "status": "Açık"}, {"$set": {"status": "Kapanıyor"}}, projection={"_id": 0})
+    if not order or not order["items"]:
+        if order:
+            await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Açık"}})
+        raise HTTPException(status_code=422, detail="Masada kapatılacak ürün yok")
+    for i in order["items"]:
+        sale = SalesEntry(product_id=i["product_id"], product_name=i["product_name"], quantity=i["quantity"], unit_price=i["unit_price"], channel="Salon",
+                          payment=body.payment, amount=round(i["quantity"] * i["unit_price"], 2), note=f"Masa {table['name']}").model_dump()
+        await insert_sale(sale, request)
+    if body.tip > 0:
+        tip = TipEntry(date=datetime.now(TZ).date().isoformat(), amount=body.tip, note=f"Masa {table['name']} · {body.payment}").model_dump()
+        await db.tips.insert_one({**tip})
+    await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Kapandı", "payment": body.payment, "tip": body.tip, "closed_at": datetime.now(timezone.utc).isoformat()}})
+    await audit(request, "Hesap kapattı", "tables", table_id, detail=f"Masa {table['name']} · {order['total']:g} ₺ · {body.payment}{f' · bahşiş {body.tip:g} ₺' if body.tip else ''}")
+    return {"ok": True, "total": order["total"], "sales": len(order["items"])}
+
+@api.post("/tables/{table_id}/cancel")
+async def table_cancel(table_id: str, request: Request):
+    table = await _table(table_id)
+    order = await db.table_orders.find_one_and_delete({"table_id": table_id, "status": "Açık"}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Masada açık hesap yok")
+    await audit(request, "Hesap iptal", "tables", table_id, detail=f"Masa {table['name']} · {order['total']:g} ₺")
+    return {"ok": True}
+
+@api.get("/tips/distribution")
+async def tips_distribution(date: str = Query(None, pattern=DATE_PATTERN)):
+    day = date or datetime.now(TZ).date().isoformat()
+    tips = await db.tips.find({"date": day}, {"_id": 0}).to_list(None)
+    total = round(sum(float(t["amount"]) for t in tips), 2)
+    clocked = [a for a in await db.attendance.find({"date": day}, {"_id": 0}).to_list(None) if a.get("end")]
+    real = {a["staff_id"] for a in clocked}
+    entries = clocked + [s for s in await db.shifts.find({"date": day}, {"_id": 0}).to_list(None) if s["staff_id"] not in real]
+    hours: Dict[str, float] = {}
+    for e in entries:
+        hours[e["staff_id"]] = hours.get(e["staff_id"], 0) + shift_hours(e)
+    names = {p["id"]: p["name"] for p in await list_items("staff", limit=None)}
+    hours = {k: v for k, v in hours.items() if k in names}
+    all_hours = sum(hours.values())
+    rows = [{"staff_id": k, "name": names[k], "hours": round(v, 2), "source": "Giriş-çıkış" if k in real else "Vardiya planı",
+             "share": round(total * v / all_hours, 2) if all_hours else 0} for k, v in sorted(hours.items(), key=lambda x: -x[1])]
+    return {"date": day, "total": total, "tips": tips, "total_hours": round(all_hours, 2), "rows": rows}
+
+async def _my_staff(request: Request) -> Dict[str, Any]:
+    member = getattr(request.state, "member", {})
+    staff = await db.staff.find_one({"id": member.get("staff_id")}, {"_id": 0}) if member.get("staff_id") else None
+    if not staff:
+        raise HTTPException(status_code=409, detail="Hesabınız bir personel kaydına bağlı değil. Yöneticinizden Kullanıcılar sayfasından bağlamasını isteyin.")
+    return staff
+
+@api.get("/attendance/me")
+async def attendance_me(request: Request):
+    member = getattr(request.state, "member", {})
+    staff = await db.staff.find_one({"id": member.get("staff_id")}, {"_id": 0}) if member.get("staff_id") else None
+    if not staff:
+        return {"linked": False}
+    open_rec = await db.attendance.find_one({"staff_id": staff["id"], "end": ""}, {"_id": 0}, sort=[("created_at", -1)])
+    today = await db.attendance.find({"staff_id": staff["id"], "date": datetime.now(TZ).date().isoformat()}, {"_id": 0}).sort("created_at", 1).to_list(None)
+    return {"linked": True, "name": staff["name"], "open": open_rec, "today": today, "today_hours": round(sum(shift_hours(a) for a in today if a.get("end")), 2)}
+
+@api.post("/attendance/clock")
+async def attendance_clock(request: Request):
+    staff = await _my_staff(request)
+    open_rec = await db.attendance.find_one({"staff_id": staff["id"], "end": ""}, {"_id": 0}, sort=[("created_at", -1)])
+    if open_rec:
+        await db.attendance.update_one({"id": open_rec["id"]}, {"$set": {"end": _now_hm()}})
+        await audit(request, "Çıkış yaptı", "attendance", open_rec["id"], detail=f"{staff['name']} · {open_rec['start']}–{_now_hm()}")
+        return {"status": "out", "start": open_rec["start"], "end": _now_hm()}
+    doc = AttendanceEntry(staff_id=staff["id"], date=datetime.now(TZ).date().isoformat(), start=_now_hm()).model_dump()
+    await db.attendance.insert_one({**doc, "restaurant_id": staff["restaurant_id"]})
+    await audit(request, "Giriş yaptı", "attendance", doc["id"], detail=f"{staff['name']} · {doc['start']}")
+    return {"status": "in", "start": doc["start"]}
+
+@api.get("/restaurants/summary")
+async def restaurants_summary():
+    rows = []
+    for r in RESTAURANTS:
+        token = current_rid.set(r["id"])
+        try:
+            today, month = await build_report("daily"), await build_report("monthly")
+            low = sum(1 for i in await list_items("inventory", limit=None) if float(i.get("quantity", 0)) <= float(i.get("minimum", 0)))
+            open_tables = await db.table_orders.count_documents({"status": "Açık"})
+        finally:
+            current_rid.reset(token)
+        rows.append({**r, "today_revenue": today["revenue"], "today_expenses": today["expenses"], "today_profit": today["profit"], "today_sales": today["sales_count"],
+                     "month_revenue": month["revenue"], "month_profit": month["profit"], "low_stock": low, "open_tables": open_tables})
+    return rows
+
+@api.get("/product-costs")
+async def product_costs():
+    inventory = await db.raw.inventory.find({}, {"_id": 0}).to_list(None)
+    by_id = {i["id"]: i for i in inventory}
+    local = {(i.get("restaurant_id"), _tr_key(i["name"])): i for i in inventory}
+    averages = await average_prices()
+    rows = []
+    for p in sorted(await list_items("products", limit=None), key=lambda x: (x.get("category") or "", x["name"])):
+        per = {r["id"]: {"cost": 0.0, "missing": []} for r in RESTAURANTS}
+        lines = []
+        for item in p.get("recipe", []):
+            base = by_id.get(item["inventory_id"])
+            if not base:
+                continue
+            amount, line = float(item["amount"]), {}
+            for r in RESTAURANTS:
+                it = local.get((r["id"], _tr_key(base["name"])))
+                price = float((it or {}).get("unit_cost", 0))
+                line[r["id"]] = round(amount * price, 2) if price else None
+                if price:
+                    per[r["id"]]["cost"] += amount * price
+                else:
+                    per[r["id"]]["missing"].append(base["name"])
+            lines.append({"name": base["name"], "unit": base.get("unit", ""), "amount": amount, "unit_price": round(averages.get(base["id"], 0), 2),
+                          "cost": round(amount * averages.get(base["id"], 0), 2), "per_restaurant": line})
+        price, cost = float(p.get("price", 0)), float(p.get("cost", 0))
+        for r in RESTAURANTS:
+            c = round(per[r["id"]]["cost"], 2)
+            per[r["id"]].update(cost=c, margin=_margin(price, c) if p.get("recipe") and not per[r["id"]]["missing"] else None)
+        rows.append({"id": p["id"], "name": p["name"], "category": p.get("category", ""), "price": price, "cost": cost, "has_recipe": bool(p.get("recipe")),
+                     "profit": round(price - cost, 2), "margin": _margin(price, cost), "food_cost_pct": round(cost / price * 100, 1) if price else None,
+                     "target_margin": float(p.get("target_margin") or 0) or 65, "suggested_price": suggested_price(p), "lines": lines, "per_restaurant": per})
+    with_recipe = [r for r in rows if r["has_recipe"] and r["price"]]
+    summary = {"products": len(rows), "with_recipe": len(with_recipe), "avg_food_cost_pct": round(sum(r["food_cost_pct"] for r in with_recipe) / len(with_recipe), 1) if with_recipe else None,
+               "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"])}
+    return {"restaurants": RESTAURANTS, "summary": summary, "products": rows}
+
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
     async def get_items():
@@ -939,6 +1221,8 @@ def make_crud(name: str, model: type[BaseModel]):
     @api.post(f"/{name}", response_model=model)
     async def create_item(item: model, request: Request):
         doc = item.model_dump()
+        if name in SCOPED:
+            specific_rid()
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "sales" and getattr(request.state, "member", {}).get("role") == "staff":
@@ -949,10 +1233,8 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "waste":
             await apply_waste(doc, 1, f"Fire · {doc['reason']}")
         if name == "sales":
-            doc["created_by"] = getattr(request.state, "member", {}).get("email", "")
-            await fill_sale_cost(doc)
-            doc["stock_moves"] = await stock_moves(doc)
-            await apply_moves(doc["stock_moves"], 1, doc, "Satış")
+            await insert_sale(doc, request)
+            return model(**doc)
         if name == "expenses" and doc.get("purchases"):
             _purchase_total(doc)
             await apply_purchases(doc, 1, f"Alış · {doc['category']}")
@@ -1037,6 +1319,8 @@ app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.envi
 @app.on_event("startup")
 async def startup():
     await db.cron_runs.create_index("run_id", unique=True)
+    for name in SCOPED:
+        await db.raw[name].update_many({"restaurant_id": {"$exists": False}}, {"$set": {"restaurant_id": DEFAULT_RESTAURANT}})
 
 @app.on_event("shutdown")
 async def shutdown():

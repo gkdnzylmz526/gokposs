@@ -34,7 +34,7 @@ export const PayrollReport = ({ refreshKey, onAddAdvance, onDeleteAdvance }) => 
   return (
     <section className="panel table-panel payroll-panel" data-testid="payroll-report">
       <div className="panel-head movements-head">
-        <div><h3>Aylık maaş raporu</h3><span className="muted">Vardiya takviminden · haftalık {data?.weekly_limit || 45} saati aşan çalışma fazla mesai (x{data?.overtime_rate || 1.5})</span></div>
+        <div><h3>Aylık maaş raporu</h3><span className="muted">Giriş-çıkış kaydı olan personelde gerçek saatler, diğerlerinde vardiya takvimi · haftalık {data?.weekly_limit || 45} saati aşan çalışma fazla mesai (x{data?.overtime_rate || 1.5})</span></div>
         <div className="movements-filter"><Wallet size={18} className="panel-icon" />
           <select value={month} onChange={(e) => setMonth(e.target.value)} data-testid="payroll-month-select">{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</select>
           <button className="primary-button" data-testid="payroll-export-button" onClick={download}><Download size={15} /> Excel indir</button>
@@ -45,7 +45,7 @@ export const PayrollReport = ({ refreshKey, onAddAdvance, onDeleteAdvance }) => 
         {!data?.rows.length && <div className="empty-state">Personel kaydı yok.</div>}
         {data?.rows.map((r, i) => (
           <div className="table-row" style={grid} key={r.staff_id} data-testid={`payroll-row-${i}`}>
-            <span><b>{r.name}</b><small className="muted block">{r.hourly_wage ? `${money(r.hourly_wage)}/saat` : "Saatlik ücret girilmemiş"}{r.leave_days ? ` · ${r.leave_days} gün izin` : ""}</small><button className="text-button tiny" data-testid={`payroll-slip-${i}`} onClick={() => slip(r)}><FileText size={10} /> Bordro PDF</button></span>
+            <span><b>{r.name}</b><small className="muted block">{r.hourly_wage ? `${money(r.hourly_wage)}/saat` : "Saatlik ücret girilmemiş"}{r.leave_days ? ` · ${r.leave_days} gün izin` : ""} · {r.hours_source}</small><button className="text-button tiny" data-testid={`payroll-slip-${i}`} onClick={() => slip(r)}><FileText size={10} /> Bordro PDF</button></span>
             <span>{r.shift_count}</span><span>{num(r.regular_hours)} sa</span>
             <span className={r.overtime_hours ? "ot-text" : ""}>{num(r.overtime_hours)} sa</span>
             <span>{money(r.regular_pay)}</span><span className={r.overtime_pay ? "ot-text" : ""}>{money(r.overtime_pay)}</span>
