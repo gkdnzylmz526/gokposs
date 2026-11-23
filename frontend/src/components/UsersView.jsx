@@ -17,7 +17,7 @@ export const UsersView = () => {
   };
   return (
     <>
-      <div className="page-head"><div><p className="eyebrow">AYARLAR</p><h2>Kullanıcılar</h2><p className="muted">Panele yalnızca "Yönetici" yetkisi olanlar girebilir. Yeni biri kayıt olduğunda "Erişimi yok" olarak başlar; buradan yönetici yapabilirsiniz.</p></div></div>
+      <div className="welcome-row"><div><p className="eyebrow">AYARLAR</p><h2>Kullanıcılar</h2><p className="muted">Panele yalnızca "Yönetici" yetkisi olanlar girebilir. Yeni biri kayıt olduğunda "Erişimi yok" olarak başlar; buradan yönetici yapabilirsiniz.</p></div></div>
       <section className="panel table-panel" data-testid="users-panel">
         <div className="table-head" style={{ gridTemplateColumns: "2fr 1fr 1fr" }}><span>E-posta</span><span>Kayıt</span><span>Yetki</span></div>
         {data.users.map((u, i) => (

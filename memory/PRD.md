@@ -120,3 +120,8 @@
 - Order delivered -> auto expense 'Sipariş teslimi' + stock add; revert removes.
 - Tested iteration_13.json; fixed stale data after order toggle, PDF escaping, date picker min.
 - Backlog: split server.py (~800 lines) into routers.
+
+## Iteration 14 (Haziran 2026)
+- Emergent-managed Clerk auth (email+password). Admin-only dashboard (roles admin/member, ADMIN_EMAIL=gkdnzylmz5261@gmail.com), Users page, router-level guard; public /izin and cron excluded.
+- Leave request email notification; monthly summary email (cron 1st 09:00 Istanbul).
+- Tested iteration_14.json: 32/32 auth tests + regressions pass; minor UI fixes.

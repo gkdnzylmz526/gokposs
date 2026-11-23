@@ -1,4 +1,4 @@
-import os, json, urllib.request
+import os, json, urllib.request, urllib.parse
 from dotenv import load_dotenv
 load_dotenv("/app/backend/.env")
 SK = os.environ["CLERK_SECRET_KEY"]
@@ -9,7 +9,7 @@ def bapi(path, body=None, method="POST"):
     return json.load(urllib.request.urlopen(req))
 
 def user_and_token(email):
-    found = bapi(f"/users?email_address={email}", method="GET")
+    found = bapi(f"/users?email_address={urllib.parse.quote(email)}", method="GET")
     user = found[0] if found else bapi("/users", {"email_address": [email], "password": "Gokboss-Test-2026!", "skip_password_checks": True})
     session = bapi("/sessions", {"user_id": user["id"]})
     token = bapi(f"/sessions/{session['id']}/tokens", {"expires_in_seconds": 3600})["jwt"]

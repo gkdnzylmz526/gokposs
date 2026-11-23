@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 14 tested Clerk auth, admin roles, the Users page, the leave-request email and the monthly-summary wiring. Backend: the new test_iteration14_auth_roles.py passed 32/32. 126 regression tests now run with the admin Bearer token through a new conftest.py; 125 passed and 1 failed only under xdist, then passed when run on its own. UI: going to / signed out redirects to /sign-in and the Clerk card shows. Admin ticket sign-in loads the dashboard. Adding a sale worked (TEST_UI_Burger x2 = ₺400). Inventory, the staff calendar and the reports XLSX/PDF downloads all work. The Users page lists the users, and demoting the only admin shows the toast 'En az bir yönetici kalmalı'. A member sees the access-denied page and its sign-out works. /izin/{token} works without login. One leave request was submitted on purpose, and its notification email went out (report_deliveries kind=leave_request, status=sent). The real owner gkdnzylmz5261@gmail.com signed up during the test and was made admin automatically. No email-send buttons were clicked and no valid-secret cron calls were made.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "tests/clerk_helper.py", "issue": "The email in GET /users?email_address= was not URL-encoded, so Clerk read '+clerk_test' as a space. The helper then tried to create the user again and got 422 form_identifier_exists. Fixed with urllib.parse.quote."},
+      {"endpoint": "current_member (server.py:52-67)", "issue": "On first sign-in, an error from the Clerk Backend API (timeout or 5xx) in _clerk_user goes unhandled and returns a bare 500. The frontend then shows 'Erişim yetkiniz yok' instead of a retry or error message."},
+      {"endpoint": "PATCH /api/users/{id}/role", "issue": "The last-admin check (count_documents, then update) is not atomic, so two admins demoting each other at the same time could leave no admin. The update_one also has no env filter. Low risk."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Dashboard topbar on Users page", "issue": "The header <h1> is empty on the Kullanıcılar page because nav.find() returns undefined for 'users'. The breadcrumb shows KULLANICILAR but there is no title (every other page has one).", "selector": "header.topbar h1", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "AuthGate /api/me failure", "issue": "Any error from /api/me (network, 500, expired token) sets role='error', and the user sees 'Erişim yetkiniz yok'. This is misleading for an admin during an outage. Show a retry or error state instead.", "affected_selectors": ["[data-testid=access-denied]"]}
+    ],
+    "design_issues": [
+      {"screen": "Kullanıcılar", "issues": ["UsersView uses the class 'page-head', which is not defined in App.css. The description text sits right on top of the users table with no gap. Other pages use 'welcome-row' with proper spacing."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration14_auth_roles.py", "/app/backend/tests/conftest.py", "/app/backend/tests/clerk_ticket.py", "/app/test_reports/pytest/iteration14_auth.xml", "/app/test_reports/pytest/iteration14_regression.xml"],
+  "action_items": [
+    "Set the topbar h1 title for the Users page (e.g. 'Kullanıcılar').",
+    "Add CSS for .page-head in UsersView, or switch to the 'welcome-row' class, so the table has spacing.",
+    "In AuthGate, tell a /api/me error apart from a 403/member result: show an error with a retry instead of access-denied.",
+    "Wrap _clerk_user in current_member with a try/except that returns 503 with a clear message.",
+    "Regression tests leave stock_movements and price_alerts behind after deleting inventory (151 + 9 rows in this run). Either cascade-delete them when inventory is deleted, or have the tests clean them up."
+  ],
+  "critical_code_review_comments": [
+    "The guard design is sound. The router-level dashboard_guard exempts only the /api/public/ and /api/cron/ prefixes and /api/me, and /api/me still calls current_member, so it needs a valid token. The Clerk router (config/proxy) sits outside the guarded router.",
+    "In the public POST /api/public/leave/{token} endpoint, each request triggers a real email (at most 10 pending per staff). That is acceptable, but think about throttling or rate-limiting per token.",
+    "server.py is 900 lines; consider splitting out the auth/users and email/cron modules.",
+    "The monthly cron endpoint is wired (401 without the secret and with a wrong or admin token). The actual schedule (1st of the month, 09:00 Istanbul) is not visible in the code and was not verified."
+  ],
+  "updated_files": ["/app/backend/tests/conftest.py (new: auto-adds the admin Bearer token to every /api request; send header X-No-Auth to skip)", "/app/backend/tests/clerk_helper.py (URL-encode email)", "/app/backend/tests/test_iteration14_auth_roles.py (new)", "/app/backend/tests/clerk_ticket.py (new: prints a sign-in ticket)"],
+  "success_rate": {"backend": "100% (32/32 new auth tests; 125/126 regression tests, the 1 failure only under xdist)", "frontend": "100% of the requested flows"},
+  "flaky_tests": ["test_iteration10_wage_copyweek_prices.py::TestCopyWeek::test_copy_dup_deleted: failed with assert 4 == 3 under -n 2 (it shares fixed 2031 weeks with other tests), passed when run alone with -n 0. This is a test isolation problem, not an app bug."],
+  "seed_data_creation": "Created and then deleted by id: product TEST_UI_Burger, 1 sale, staff TEST_UI_Staff (deleting the staff also removed its leave request), and a staff record in TestExempt (deleted in finally). Deleted orphan stock_movements (151) and price_alerts (9) that my regression run created between 15:54 and 15:56 UTC. The DB was empty of these before the run. Kept: users (3; the 3rd is the real owner, gkdnzylmz5261@gmail.com, who signed up at 15:58 and was auto-promoted to admin; I did not create it) and report_deliveries (4; one is the leave_request email record from my single submission).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "From /app/memory/test_credentials.md. Get tokens with: cd /app/backend/tests && python3 clerk_helper.py <email>. Get UI tickets with: python3 clerk_ticket.py <email>, then open /sign-in?__clerk_ticket=<t>. Tickets are single-use.",
+  "context_for_next_testing_agent": "Run the regression suite while excluding the tests that send real email: iteration5 test_cron_accept_and_duplicate, test_cron_empty_body and test_email_status_and_send_now; iteration8 accepted_then_duplicate; and the iteration13 tests that POST to /public/leave (test_validations, test_31_days, max_pending, approve_creates, reject_and_bad). The leave-request POST now emails the owner. Run test_iteration14_auth_roles.py with -n 0, because it promotes and demotes the member and the parallel 403 tests would race with that. There are now 2 admins (test admin + real owner), so the 'demote last admin -> 409' test in test_iteration14 now skips itself when more than 1 admin exists (it passed earlier while the test admin was the only admin). Do not change the owner's role."
+}
