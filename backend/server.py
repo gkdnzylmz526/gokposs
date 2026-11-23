@@ -353,7 +353,7 @@ async def order_list():
         group = groups.setdefault(supplier, {"supplier": supplier, "phone": phones.get(_tr_key(supplier), ""), "items": [], "estimated_total": 0})
         cost = round(amount * price, 2)
         group["items"].append({"inventory_id": item["id"], "name": item["name"], "unit": item.get("unit", ""), "quantity": item.get("quantity", 0), "minimum": item.get("minimum", 0), "suggested": amount, "estimated_cost": cost,
-                               "unit_price": price, "assigned_supplier": assigned, "cheapest": bool(cheapest) and len(comparison) > 1,
+                               "unit_price": price, "assigned_supplier": assigned, "cheapest": bool(cheapest) and sum(c["supplier"] != "Tedarikçi belirtilmemiş" for c in comparison) > 1,
                                "saving": round((assigned_price - price) * amount, 2) if cheapest and assigned_price and assigned != supplier else 0})
         group["estimated_total"] = round(group["estimated_total"] + cost, 2)
     return sorted(groups.values(), key=lambda g: g["supplier"])

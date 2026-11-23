@@ -98,3 +98,10 @@
 - Staff hourly_wage + weekly pay/payroll in shift calendar; copy previous week (/api/shifts/copy-week).
 - Ingredient price history chart + supplier price comparison (/api/inventory/{id}/prices).
 - Tested iteration_10.json: all passed; UI nits fixed.
+
+## Iteration 11 (Haziran 2026)
+- Monthly payroll (/api/payroll, /api/payroll/export xlsx), overtime >45h/week at 1.5×.
+- Smart order list: groups by cheapest supplier from purchase history, saving vs assigned.
+- Staff phone + per-person WhatsApp weekly plan link.
+- Backend pytest (15) passed; frontend verified via Playwright script. Testing agent run was interrupted (credits).
+- Backlog: split server.py into routers (~640 lines).
