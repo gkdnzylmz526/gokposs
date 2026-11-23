@@ -59,3 +59,10 @@
 ## Backlog
 - P1: Split App.js into components
 - P2: Authentication (user deferred), record edit/delete in UI, date-range custom report filter
+
+## Iteration 5 (Haziran 2026)
+- Edit/delete for all lists (PUT/DELETE /api/{collection}/{id}), RowActions with confirm.
+- Custom date range reports (period=custom&start&end) + exports.
+- Stock deduction on sale: product recipe (inventory_id, amount) or same-name inventory fallback (Turkish-aware match); applied moves stored on sale (stock_moves) and reversed on edit/delete.
+- Gün sonu e-postası: Gmail SMTP (mailer.py, GMAIL_USERNAME / GMAIL_APP_PASSWORD), recipient REPORT_RECIPIENT, cron .emergent/crons.yml 23:59 Europe/Istanbul -> POST /api/cron/daily-report (Bearer WEBHOOK_CRON_SECRET), manual POST /api/email/send-now, GET /api/email/status.
+- Tested: iteration_5.json; fixes applied for 502->200 failed status, empty cron body, negative profit color, sticky mobile actions, rounding.

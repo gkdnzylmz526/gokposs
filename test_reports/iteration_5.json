@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 5: tested PUT/DELETE for all 6 collections, stock deduction (recipe and name match), custom-range reports and exports, the cron webhook, and the email endpoints (20 pytest cases, 18 passed). Also ran a Playwright end-to-end test of the UI on desktop and at 390px. Edit/delete, recipe stock deduction (10 -> 9.4 -> 9.7 -> 10 in both API and UI), custom range filtering (inclusive, Istanbul-local, 422 on bad input), PDF/XLSX export for a custom range, cron auth (401), accepted/duplicate handling and the failed-delivery history record all work. Two real bugs: (1) the platform proxy (Cloudflare) replaces the backend's 502 response from /api/email/send-now with its own response, so the UI toast shows an English Cloudflare message instead of the Turkish detail. (2) The cron endpoint returns 400 when the POST has no body. Only records I created were deleted afterwards; all 6 collections plus report_deliveries and cron_runs are now empty.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/email/send-now", "issue": "Returns HTTP 502. Through the public URL, Cloudflare replaces the response with its own content ('The origin web server returned an invalid or incomplete response to Cloudflare...'). The Turkish detail 'E-posta gönderilemedi. Gmail bilgilerini kontrol edin.' only shows up on localhost:8001. The frontend toast shows the Cloudflare English text. Fix: use a non-5xx code (e.g. 424/409/400) or return 200 {status:'failed', detail}.", "priority": "HIGH"},
+      {"endpoint": "POST /api/cron/daily-report", "issue": "A POST with no body (correct Bearer) returns 400 'Invalid body' because await request.json() fails on an empty body. If the platform cron sends no body, the nightly email never runs. Fix: treat an empty or invalid body as {} (e.g. body = await request.body(); parse only if non-empty).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "apply_stock (PUT/DELETE sales)", "issue": "Reversal uses the product's CURRENT recipe, not the one used when the sale was created. If the recipe changes between sale and edit/delete, stock drifts. Consider storing the applied deductions on the sale document."},
+      {"endpoint": "apply_stock name match", "issue": "update_one on a case-insensitive regex: only the first matching inventory item is changed. Mongo's 'i' option does not fold Turkish İ/ı."},
+      {"endpoint": "Inventory quantities", "issue": "Repeated float $inc can leave values like 9.700000000000001, and the UI shows raw numbers. Round on display or in the backend."},
+      {"endpoint": "list_items default limit 100", "issue": "Dashboard lists (and data.products used for the sales select) are capped at 100 items."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EmailCard send-now", "issue": "The error toast shows the English Cloudflare message instead of the Turkish one, because of the backend 502 issue.", "selector": "[data-testid=email-send-now-button]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Reports Dönem özeti", "issues": ["Net tahmini kâr is styled green even when negative (e.g. -₺451). Use red for negative values."]},
+      {"screen": "Mobile 390px list tables", "issues": ["Rows have min-width 520px inside an overflow-x:auto panel, so the edit/delete buttons sit off-screen (x≈455) and users must scroll the table sideways to find them. Consider a stacked/card layout or sticky action column on mobile."]},
+      {"screen": "Reports custom range", "issues": ["Native browser date inputs (type=date) are used instead of the shadcn calendar/date picker; on desktop they show the browser's mm/dd/yyyy format, not Turkish dd.mm.yyyy."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration5_crud_stock_cron.py", "/app/test_reports/pytest/pytest_iter5.xml"],
+  "action_items": [
+    "Change /api/email/send-now failure status from 502 to a 4xx (or 200 with status:'failed') so the Turkish detail reaches the UI",
+    "Make /api/cron/daily-report accept an empty body (don't return 400)",
+    "Color negative net profit red in the Reports summary",
+    "Improve discoverability of row edit/delete actions on mobile",
+    "Optional: store the applied stock deductions on the sale so reversal is exact even after a recipe change; round inventory quantities"
+  ],
+  "critical_code_review_comments": [
+    "cron_daily_report: request.json() on an empty body raises, returning 400. Cron ack should be robust.",
+    "send_daily_report: every failed attempt (including each manual click) adds a history record. Acceptable, but history may get noisy.",
+    "cron_runs insert happens before the background job, so a crashed send is never retried for that run_id (acceptable for at-most-once).",
+    "Frontend saveEntry for sales finds the product by name, so editing an old sale whose product was renamed or deleted fails with 'Lütfen bir menü ürünü seçin'."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration5_crud_stock_cron.py"],
+  "success_rate": {"backend": "90% (18/20)", "frontend": "95% (all flows work; send-now error toast text wrong)"},
+  "seed_data_creation": "None kept. All TEST_ records created by API and UI tests were deleted by id. report_deliveries (5 records, all mine) and cron_runs (TEST_run_* records) were removed. All collections are now empty.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest tests/test_iteration5_crud_stock_cron.py -p no:xdist -o addopts=''. It cleans up CRUD records itself, but report_deliveries/cron_runs records it creates (key TEST_run_*) need manual cleanup (see the /tmp/cleanup_iter5.py approach). Sales can be backdated by passing created_at in the POST body, which is useful for custom-range tests. Gmail is not configured, so send failures are expected.",
+  "rca of the issue": "send-now: the backend raises HTTPException(502). The Emergent ingress/Cloudflare intercepts origin 502s and replaces the body (verified with curl: the public URL returns Cloudflare content, localhost:8001 returns the JSON detail). Cron: line 188 'body = await request.json()' raises JSONDecodeError (a ValueError) on an empty body, which is caught and turned into a 400."
+}

@@ -37,3 +37,4 @@
 .recipe-summary { display:block; margin-top:12px; font-size:11px; color:var(--muted); line-height:1.5; }
 .range-picker { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:20px; } .range-picker label { font-size:11px; font-weight:700; color:var(--muted); } .range-picker input { display:block; margin-top:6px; border:1px solid var(--line); border-radius:5px; padding:9px 11px; font-size:12px; background:#fff; }
 .email-card { margin-top:19px; } .email-row { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; } .email-row b,.email-row small { display:block; } .email-row small { font-size:11px; color:var(--muted); margin-top:4px; } .email-row button:disabled { opacity:.6; cursor:wait; }
+@media(max-width:700px){.table-row .row-actions{position:sticky;right:0;background:#fff;padding-left:6px;box-shadow:-8px 0 8px -6px #0f172a1a}}

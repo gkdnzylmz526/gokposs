@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="20" time="11.941" timestamp="2026-11-23T14:00:03.821144+00:00" hostname="agent-env-e65ae156-7493-4ecf-a24c-1c4d5d3994cb"><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_and_delete[expenses-payload0-patch0]" time="0.433" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_and_delete[staff-payload1-patch1]" time="0.369" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_and_delete[cash-payload2-patch2]" time="0.146" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_and_delete[inventory-payload3-patch3]" time="0.315" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_and_delete[products-payload4-patch4]" time="0.241" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_update_unknown_404" time="0.025" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_recipe_stock_flow" time="0.352" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_name_match_stock" time="0.204" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range" time="0.315" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range_invalid[params0]" time="0.028" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range_invalid[params1]" time="0.072" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range_invalid[params2]" time="0.035" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range_invalid[params3]" time="0.061" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_range_invalid[params4]" time="0.069" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_export[xlsx-spreadsheetml-PK]" time="0.108" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_custom_export[pdf-application/pdf-%PDF]" time="0.061" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_cron_auth" time="0.057" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_cron_accept_and_duplicate" time="8.176" /><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_cron_empty_body" time="0.063"><failure message="AssertionError: empty-body cron returned 400 {&quot;detail&quot;:&quot;Invalid body&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">tests/test_iteration5_crud_stock_cron.py:154: in test_cron_empty_body
+    assert r.status_code == 200, f"empty-body cron returned {r.status_code} {r.text}"
+E   AssertionError: empty-body cron returned 400 {"detail":"Invalid body"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="tests.test_iteration5_crud_stock_cron" name="test_email_status_and_send_now" time="0.669"><failure message="requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">/root/.venv/lib/python3.11/site-packages/requests/models.py:1116: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_iteration5_crud_stock_cron.py:163: in test_email_status_and_send_now
+    assert "E-posta gönderilemedi" in r.json()["detail"]
+                                      ^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:1120: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</failure></testcase></testsuite></testsuites>

@@ -12,7 +12,7 @@ export const EmailCard = () => {
   useEffect(() => { load(); }, []);
   const sendNow = async () => {
     setSending(true);
-    try { const { data } = await axios.post(`${API}/email/send-now`); toast.success(`Rapor ${data.recipient} adresine gönderildi`); }
+    try { const { data } = await axios.post(`${API}/email/send-now`); if (data.status === "sent") toast.success(`Rapor ${data.recipient} adresine gönderildi`); else toast.error(data.detail); }
     catch (e) { toast.error(e.response?.data?.detail || "E-posta gönderilemedi"); }
     finally { setSending(false); load(); }
   };

@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import json
 import re
 import logging
 import os
@@ -44,6 +45,7 @@ class SalesEntry(Entry):
     channel: str = "Salon"
     amount: float = 0
     note: str = ""
+    stock_moves: List[Dict[str, Any]] = []
 
 class ExpenseEntry(Entry):
     category: str = "Diğer"
@@ -96,10 +98,10 @@ async def root():
 async def dashboard():
     sales = await list_items("sales")
     expenses = await list_items("expenses")
-    inventory = await list_items("inventory")
-    staff = await list_items("staff")
+    inventory = await list_items("inventory", limit=None)
+    staff = await list_items("staff", limit=None)
     cash = await list_items("cash")
-    products = await list_items("products")
+    products = await list_items("products", limit=None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     week_sales = await list_items("sales", week_start, None)
@@ -184,11 +186,12 @@ async def cron_daily_report(request: Request, background: BackgroundTasks):
     auth = request.headers.get("authorization", "")
     if not secret or not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
+    raw = await request.body()
     try:
-        body = await request.json()
+        body = json.loads(raw) if raw.strip() else {}
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid body")
-    run_id = request.headers.get("x-webhook-id") or (body or {}).get("run_id") or str(uuid.uuid4())
+    run_id = request.headers.get("x-webhook-id") or (body.get("run_id") if isinstance(body, dict) else None) or str(uuid.uuid4())
     try:
         await db.cron_runs.insert_one({"run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat()})
     except DuplicateKeyError:
@@ -200,7 +203,7 @@ async def cron_daily_report(request: Request, background: BackgroundTasks):
 async def email_send_now():
     record = await send_daily_report("manual")
     if record["status"] != "sent":
-        raise HTTPException(status_code=502, detail="E-posta gönderilemedi. Gmail bilgilerini kontrol edin.")
+        return {"status": "failed", "detail": "E-posta gönderilemedi. Gmail bilgilerini kontrol edin."}
     return {"status": "sent", "recipient": record["recipient"]}
 
 @api.get("/email/status")
@@ -223,16 +226,23 @@ async def cash_reconciliation(date: str | None = None):
     expected = opening + sales_total - expenses_total
     return {"date": target, "opening": opening, "sales": sales_total, "expenses": expenses_total, "expected_closing": expected, "actual_closing": actual, "difference": actual - expected, "has_closing": bool(cash_logs)}
 
-async def apply_stock(sale: Dict[str, Any], sign: int) -> None:
-    quantity = float(sale.get("quantity", 1)) * sign
-    product = await db.products.find_one({"id": sale.get("product_id")}) if sale.get("product_id") else None
-    if not product and sale.get("product_name"):
-        product = await db.products.find_one({"name": {"$regex": f"^{re.escape(sale['product_name'].strip())}$", "$options": "i"}})
+def _tr_key(value: str) -> str:
+    return (value or "").replace("I", "ı").replace("İ", "i").lower().strip()
+
+async def stock_moves(sale: Dict[str, Any]) -> List[Dict[str, Any]]:
+    quantity = float(sale.get("quantity", 1))
+    key = _tr_key(sale.get("product_name", ""))
+    product = await db.products.find_one({"id": sale.get("product_id")}, {"_id": 0}) if sale.get("product_id") else None
+    if not product and key:
+        product = next((p for p in await list_items("products", limit=None) if _tr_key(p["name"]) == key), None)
     if product and product.get("recipe"):
-        for item in product["recipe"]:
-            await db.inventory.update_one({"id": item["inventory_id"]}, {"$inc": {"quantity": -float(item["amount"]) * quantity}})
-    elif sale.get("product_name"):
-        await db.inventory.update_one({"name": {"$regex": f"^{re.escape(sale['product_name'].strip())}$", "$options": "i"}}, {"$inc": {"quantity": -quantity}})
+        return [{"inventory_id": r["inventory_id"], "delta": -float(r["amount"]) * quantity} for r in product["recipe"]]
+    match = next((i for i in await list_items("inventory", limit=None) if key and _tr_key(i["name"]) == key), None)
+    return [{"inventory_id": match["id"], "delta": -quantity}] if match else []
+
+async def apply_moves(moves: List[Dict[str, Any]], sign: int) -> None:
+    for move in moves:
+        await db.inventory.update_one({"id": move["inventory_id"]}, [{"$set": {"quantity": {"$round": [{"$add": ["$quantity", move["delta"] * sign]}, 3]}}}])
 
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
@@ -241,20 +251,22 @@ def make_crud(name: str, model: type[BaseModel]):
     @api.post(f"/{name}", response_model=model)
     async def create_item(item: model):
         doc = item.model_dump()
-        await db[name].insert_one({**doc})
         if name == "sales":
-            await apply_stock(doc, 1)
-        return item
+            doc["stock_moves"] = await stock_moves(doc)
+            await apply_moves(doc["stock_moves"], 1)
+        await db[name].insert_one({**doc})
+        return model(**doc)
     @api.put(f"/{name}/{{item_id}}", response_model=model)
     async def update_item(item_id: str, item: model):
         old = await db[name].find_one({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
-        await db[name].replace_one({"id": item_id}, doc)
         if name == "sales":
-            await apply_stock(old, -1)
-            await apply_stock(doc, 1)
+            await apply_moves(old.get("stock_moves", []), -1)
+            doc["stock_moves"] = await stock_moves(doc)
+            await apply_moves(doc["stock_moves"], 1)
+        await db[name].replace_one({"id": item_id}, doc)
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
     async def delete_item(item_id: str):
@@ -262,7 +274,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         if name == "sales":
-            await apply_stock(old, -1)
+            await apply_moves(old.get("stock_moves", []), -1)
         return {"ok": True}
     return get_items, create_item, update_item, delete_item
 
