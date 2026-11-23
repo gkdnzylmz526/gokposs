@@ -69,9 +69,8 @@ def test_order_list(s):
     assert i2["suggested"] == 7 and i2["estimated_cost"] == 280  # 4*2-1
     _, i3 = find_item(groups, eq["id"])
     assert i3 is not None and i3["suggested"] == 4  # at minimum is included
-    gn, i4 = find_item(groups, neg["id"])
-    assert i4["suggested"] == 0 and i4["estimated_cost"] == 0
-    assert gn["supplier"] == "Tedarikçi belirtilmemiş"
+    # iteration 8: items with suggested == 0 are now excluded from the order list
+    assert find_item(groups, neg["id"]) == (None, None)
     assert find_item(groups, ok["id"]) == (None, None)
     assert g["estimated_total"] == round(sum(x["estimated_cost"] for x in g["items"]), 2)
     assert g["estimated_total"] == 390 + 280 + 40

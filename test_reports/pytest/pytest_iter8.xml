@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="9" time="4.138" timestamp="2026-11-23T14:37:19.052208+00:00" hostname="agent-env-e65ae156-7493-4ecf-a24c-1c4d5d3994cb"><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestWeeklyCron" name="test_no_auth" time="0.321" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestPurchases" name="test_purchase_lifecycle" time="1.062" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestWeeklyCron" name="test_wrong_bearer" time="0.089" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestWeeklyCron" name="test_accepted_then_duplicate" time="2.228" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestPurchases" name="test_edit_with_stale_amount_keeps_old_amount" time="0.328"><failure message="AssertionError: amount stays at old 200 when the client re-sends it&#10;assert 200.0 == 100">self = &lt;test_iteration8_purchases_suppliers_weekly.TestPurchases object at 0xfb04e0ad4a10&gt;
+
+    def test_edit_with_stale_amount_keeps_old_amount(self):
+        """Frontend edit sends existing amount; check whether amount follows new purchase total."""
+        item = create("inventory", {"name": "TEST_Sogan", "quantity": 0, "unit": "kg", "unit_cost": 10})
+        exp = create("expenses", {"category": "Sebze", "purchases": [{"inventory_id": item["id"], "quantity": 10, "unit_price": 20}]})
+        r = requests.put(f"{API}/expenses/{exp['id']}", json={**exp, "purchases": [{"inventory_id": item["id"], "quantity": 5, "unit_price": 20}]})
+        print("amount after edit with stale amount:", r.json()["amount"])
+        assert inv(item["id"])["quantity"] == 5
+&gt;       assert r.json()["amount"] == 100, "amount stays at old 200 when the client re-sends it"
+E       AssertionError: amount stays at old 200 when the client re-sends it
+E       assert 200.0 == 100
+
+tests/test_iteration8_purchases_suppliers_weekly.py:95: AssertionError</failure></testcase><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestPurchases" name="test_manual_amount_kept" time="0.327" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestPurchases" name="test_plain_expense_no_purchases" time="0.629" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestSuppliers" name="test_supplier_crud_and_order_list_phone" time="0.687" /><testcase classname="tests.test_iteration8_purchases_suppliers_weekly.TestSuppliers" name="test_supplier_requires_name" time="0.148" /></testsuite></testsuites>

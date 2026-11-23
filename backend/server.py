@@ -50,8 +50,8 @@ class SalesEntry(Entry):
 
 class PurchaseItem(BaseModel):
     inventory_id: str
-    quantity: float
-    unit_price: float = 0
+    quantity: float = Field(gt=0)
+    unit_price: float = Field(default=0, ge=0)
 
 class ExpenseEntry(Entry):
     category: str = "Diğer"
@@ -390,6 +390,9 @@ def make_crud(name: str, model: type[BaseModel]):
             doc = await with_recipe_cost(doc)
         if name == "expenses" and (old.get("purchases") or doc.get("purchases")):
             await apply_purchases(old, -1, "Alış düzeltildi (eski kayıt geri alındı)")
+            old_total = sum(float(p["quantity"]) * float(p.get("unit_price", 0)) for p in old.get("purchases", []))
+            if old.get("purchases") and abs(float(old.get("amount", 0)) - old_total) < 0.01 and abs(float(doc.get("amount", 0)) - old_total) < 0.01:
+                doc["amount"] = 0
             _purchase_total(doc)
             await apply_purchases(doc, 1, f"Alış düzeltildi · {doc['category']}")
         if name == "sales":

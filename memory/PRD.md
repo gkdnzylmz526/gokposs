@@ -79,3 +79,10 @@
 - Recipe cost auto-calculation (cost_from_recipe), recomputed on inventory changes; sales fill unit_cost from product if missing.
 - Gmail app password fixed: manual send verified (status sent). Nightly cron 23:59 Europe/Istanbul active.
 - Tested iteration_7.json: all passed; minor nits fixed.
+
+## Iteration 8 (Haziran 2026)
+- Weekly summary email (Mon 09:00 Istanbul, cron weekly-summary -> /api/cron/weekly-summary), manual send ?kind=weekly.
+- Purchase expenses add stock + update unit_cost + log 'Alış'; auto amount; edit/delete reverse.
+- Suggested menu price (target_margin, default 65%).
+- Suppliers directory (/api/suppliers), WhatsApp order button opens supplier phone (TR normalization).
+- Tested iteration_8.json; edit-amount recompute + validation fixed.

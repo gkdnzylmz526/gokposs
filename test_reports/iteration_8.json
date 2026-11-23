@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 8: tested the weekly summary cron, purchase expenses, suggested price, Suppliers and the WhatsApp order list on both backend and frontend. Backend: 8 of 9 new tests passed, and the iteration 6/7/exports regression run passed 23 of 23 after one outdated assertion was updated. The weekly cron rejects requests with no token or a wrong token (401). It accepted one call with the correct token and X-Webhook-Id, returned duplicate on the repeat, and stored a weekly/cron/sent delivery record. This sent exactly ONE real email. Purchase flow via API: amount auto-filled to 6500, stock went 1→11, unit_cost updated to 650, an 'Alış · Et' movement was logged, recipe cost went 90→97.5, PUT with amount 0 changed stock to 6, and DELETE brought it back to 1. UI: the full flow works, including Suppliers CRUD, the inventory supplier select, the purchase editor and its total, the product card suggested price (65% default and a custom 50%), and the order list WhatsApp href and phone. ONE BUG: editing a purchase expense in the UI does not recompute the amount.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/expenses/{id}", "issue": "_purchase_total only fills amount when amount == 0. When a purchase expense is edited, the frontend sends the existing amount (6500) again. After the quantity changes 10→5, stock becomes 6 but amount stays 6500 instead of 3250, so reports and cash expenses are overstated. Reproduced through the UI and the API (test_edit_with_stale_amount_keeps_old_amount)."},
+      {"endpoint": "POST/PUT /api/expenses", "issue": "PurchaseItem quantity and unit_price are not validated. Negative or zero values are accepted, and a negative quantity would lower stock. Also, deleting or reversing a purchase does not restore the previous unit_cost. That may be acceptable, but it is not documented."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EntryModal (expense edit)", "issue": "On edit, the amount field is prefilled with the old auto-computed total, so changing purchase rows never updates the amount. Fix: on the backend, always recompute when the old amount equaled the old purchase total. Or on the frontend, track whether the amount was auto-computed and clear or sync it.", "selector": "[data-testid='amount-field'] input", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Stok Sayımı", "issues": ["When a supplier is deleted, inventory rows keep the orphaned supplier name. In the edit modal the select then shows 'Seçin', so saving the item silently clears its supplier."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration8_purchases_suppliers_weekly.py", "/app/backend/tests/test_iteration7_order_list_recipe_cost.py", "/app/test_reports/pytest/pytest_iter8.xml"],
+  "action_items": [
+    "Fix the stale amount on purchase expense edit. For example, in update_item for expenses, recompute amount when old amount == old purchase total or when amount is 0, or have the frontend clear amount when it was auto-computed.",
+    "Optional: validate PurchaseItem quantity > 0 and unit_price >= 0 (Field(gt=0) / Field(ge=0)).",
+    "Optional: handle inventory supplier names that no longer match a supplier (show them in the select or warn)."
+  ],
+  "critical_code_review_comments": [
+    "App.js is only 44 lines, but the lines are extremely long (single-line components such as saveEntry, fieldsFor, Overview and ListView). It is unreadable and hard to diff. Split it into components/files.",
+    "apply_purchases calls recompute_product_costs on every expense create, update and delete, plus apply_moves logging per item. This is fine at this scale.",
+    "Order list now excludes items with suggested == 0 (an earlier recommendation was implemented). The iteration 7 test was updated to match."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration8_purchases_suppliers_weekly.py", "/app/backend/tests/test_iteration7_order_list_recipe_cost.py"],
+  "success_rate": {"backend": "89% (8/9 new; 23/23 regression)", "frontend": "95% (all flows work; the stale amount on edit is the only defect)"},
+  "seed_data_creation": "None left behind. Every TEST_ record was deleted by id/name. stock_movements for deleted inventory (92) and my cron_run TEST_weekly_* were removed. 1 new report_deliveries record (weekly, cron, sent) was kept as instructed. The DB was NOT empty at start: Köfte (product), Kasap Ali (supplier), Dana kıyma (inventory) and their 3 stock_movements were created at 14:34 by someone else, likely the main agent's self-test. They were left untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env|cut -d= -f2) && python -m pytest tests/test_iteration8_purchases_suppliers_weekly.py tests/test_iteration7_order_list_recipe_cost.py tests/test_iteration6_stock_movements.py tests/test_exports.py. The real-email cron test is skipped unless RUN_REAL_EMAIL_CRON=1. Do NOT click email-send-now-button or email-send-weekly-button. RowActions testids: {row}-edit, {row}-delete, {row}-confirm-delete. Modal inputs: [data-testid='{key}-field'] input; selects: {key}-select."
+}

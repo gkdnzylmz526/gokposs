@@ -54,7 +54,7 @@ function Field({ field, value, onChange, inventory, autoFocus }) {
   return (
     <label data-testid={`${field.key}-field`}>{field.label}
       {field.type === "select"
-        ? <select value={value || ""} onChange={(e) => onChange(e.target.value)} data-testid={`${field.key}-select`}><option value="">Seçin</option>{field.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
+        ? <select value={value || ""} onChange={(e) => onChange(e.target.value)} data-testid={`${field.key}-select`}><option value="">Seçin</option>{[...field.options, ...(value && !field.options.includes(value) ? [value] : [])].map((o) => <option key={o} value={o}>{o}</option>)}</select>
         : <input autoFocus={autoFocus} type={field.type || "text"} step="any" placeholder={field.placeholder} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />}
     </label>
   );
