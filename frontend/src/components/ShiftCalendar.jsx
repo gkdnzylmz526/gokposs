@@ -38,7 +38,7 @@ export const ShiftCalendar = ({ staff, shifts, onAdd, onEdit, onDelete }) => {
                       {cell.map((s) => (
                         <div key={s.id} className="shift-chip" data-testid={`shift-chip-${s.id}`} onClick={() => onEdit("shifts", s)}>
                           <span>{s.start}–{s.end}</span>{s.task && <small>{s.task}</small>}
-                          <button className="chip-x" title="Sil" data-testid={`shift-delete-${s.id}`} onClick={(e) => { e.stopPropagation(); onDelete("shifts", s.id); }}><X size={11} /></button>
+                          <button className="chip-x" title="Sil" data-testid={`shift-delete-${s.id}`} onClick={(e) => { e.stopPropagation(); if (window.confirm(`${s.start}–${s.end} vardiyası silinsin mi?`)) onDelete("shifts", s.id); }}><X size={11} /></button>
                         </div>
                       ))}
                       <button className="shift-add" title="Vardiya ekle" data-testid={`shift-add-${person.id}-${date}`} onClick={() => onAdd("shifts", { staff_id: person.id, date, ...defaultHours(person), task: person.task || "" })}><Plus size={13} /></button>

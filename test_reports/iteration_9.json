@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 9: tested supplier monthly spending, price-change alerts, bulk suggested-price apply, weekly shift calendar (backend + frontend) plus regression. Backend: 16/16 new pytest pass; regression suites (iter6/7/8 + exports) 31 pass, 1 skipped (real-email cron). Frontend: every requested flow works end to end. No email endpoints were called.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "POST /api/shifts", "issue": "No validation of date (YYYY-MM-DD), start/end (HH:MM) or staff_id existence. Shifts can be saved for staff that do not exist or with malformed times, and ShiftCalendar.hours() would then produce NaN."},
+    {"endpoint": "PUT/DELETE /api/expenses (purchases)", "issue": "Reversing a purchase (delete or edit) does not restore the previous inventory unit_cost. After deleting a 720 purchase, the ingredient stays at 720 and the price alert remains. This is long-standing behaviour, noted for awareness."},
+    {"endpoint": "GET /api/suppliers/spending", "issue": "An explicit supplier string is kept after the supplier is deleted or renamed, so rows like 'Kasap Ali' appear with no matching supplier record. Acceptable but worth knowing."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Shift modal", "issues": ["The native <input type=time> follows the browser locale: an en-US browser shows 10:00 AM/PM instead of 24h. Fine for tr-TR browsers."]},
+      {"screen": "Shift calendar", "issues": ["Shifts older than 62 days are not in the dashboard payload, so navigating more than about 9 weeks back shows empty weeks with no hint.", "The chip x deletes immediately with no confirm or undo, unlike the RowActions confirm-delete pattern."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration9_spending_alerts_bulk_shifts.py", "/app/test_reports/pytest/iteration9.xml", "/app/tests/seed_iter9_ui.py", "/app/tests/cleanup_iter9.py"],
+  "action_items": [
+    "Optional: validate ShiftEntry fields (regex for date and HH:MM, staff_id exists) and return 422/404.",
+    "Optional: add a confirm step to shift chip delete, or show an undo toast."
+  ],
+  "critical_code_review_comments": [
+    "apply_purchases reads `before` products after apply_moves but before the unit_cost update, which is correct: old_cost comes from the pre-update recipe cost (verified 90 -> 108).",
+    "PRICE_ALERT_PCT is defined after apply_purchases. It works at runtime, but moving it above the function would read better.",
+    "apply_suggested_prices takes payload: Dict[str, List[str]] rather than a Pydantic model; {} is silently accepted. Consider class ApplySuggested(BaseModel): product_ids: List[str].",
+    "server.py is 529 lines with mixed concerns (reports, email, cron, stock, pricing). Consider splitting into modules before it passes 700 lines."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration9_spending_alerts_bulk_shifts.py", "/app/tests/seed_iter9_ui.py", "/app/tests/cleanup_iter9.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "TEST_ suppliers, inventory, products, expenses and staff were created for the UI test and all deleted by id. Orphaned TEST_ stock_movements (87) and price_alerts (4) whose inventory no longer exists were removed. The collections were NOT cleared wholesale: blanket deletes are against the test-data rules, and non-TEST data was present that I did not create: inventory 'Dana kıyma', product 'Köfte' (price 309), staff 'Ayşe' plus 1 shift, expenses 'Et' (supplier Kasap Ali) and 'Sebze' (Hal Mehmet), 1 price_alert (Dana kıyma) and 2 stock_movements. All left untouched. cron_runs is 0. report_deliveries is untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/test_iteration9_spending_alerts_bulk_shifts.py tests/test_iteration8_purchases_suppliers_weekly.py tests/test_iteration7_order_list_recipe_cost.py tests/test_iteration6_stock_movements.py tests/test_exports.py. Note: iteration8 tests leave a TEST_Sogan price alert (10 -> 20); clean orphaned alerts afterwards. Never call email send-now or cron. UI testids verified: price-alert-{i}, price-alert-dismiss-{i}, bulk-price-button/dialog/row/check/confirm, product-suggested-price-{id}, supplier-spending-row-{i}, supplier-spending-months, supplier-select, shift-add-{staff}-{date}, shift-chip-{id}, shift-delete-{id}, shift-person-{id}, shift-prev/this/next-week, and modal inputs [data-testid='start-field'] input etc."
+}

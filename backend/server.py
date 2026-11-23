@@ -63,10 +63,10 @@ class ExpenseEntry(Entry):
     stock_moves: List[Dict[str, Any]] = []
 
 class ShiftEntry(Entry):
-    staff_id: str
-    date: str
-    start: str = "09:00"
-    end: str = "17:00"
+    staff_id: str = Field(min_length=1)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start: str = Field(default="09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="17:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     task: str = ""
 
 class SupplierEntry(Entry):
@@ -130,7 +130,7 @@ async def dashboard():
     cash = await list_items("cash")
     products = await list_items("products", limit=None)
     suppliers = await list_items("suppliers", limit=None)
-    shifts = await db.shifts.find({"date": {"$gte": (datetime.now(TZ).date() - timedelta(days=62)).isoformat()}}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
+    shifts = await db.shifts.find({}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     week_sales = await list_items("sales", week_start, None)

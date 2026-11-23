@@ -86,3 +86,10 @@
 - Suggested menu price (target_margin, default 65%).
 - Suppliers directory (/api/suppliers), WhatsApp order button opens supplier phone (TR normalization).
 - Tested iteration_8.json; edit-amount recompute + validation fixed.
+
+## Iteration 9 (Haziran 2026)
+- Supplier monthly spending (/api/suppliers/spending), expense supplier field.
+- Price change alerts (>=10% increase via purchase) with affected product margins; dismiss.
+- Bulk apply suggested prices (/api/products/apply-suggested) with confirm dialog.
+- Weekly shift calendar (shifts collection, CRUD /api/shifts).
+- Tested iteration_9.json: all passed; shift validation + delete confirm added.
