@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import math
 import json
 import re
 import logging
@@ -57,8 +58,16 @@ class ExpenseEntry(Entry):
     category: str = "Diğer"
     amount: float = 0
     note: str = ""
+    supplier: str = ""
     purchases: List[PurchaseItem] = []
     stock_moves: List[Dict[str, Any]] = []
+
+class ShiftEntry(Entry):
+    staff_id: str
+    date: str
+    start: str = "09:00"
+    end: str = "17:00"
+    task: str = ""
 
 class SupplierEntry(Entry):
     name: str
@@ -99,7 +108,7 @@ class ProductEntry(Entry):
     cost_from_recipe: bool = False
     target_margin: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry}
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -121,6 +130,7 @@ async def dashboard():
     cash = await list_items("cash")
     products = await list_items("products", limit=None)
     suppliers = await list_items("suppliers", limit=None)
+    shifts = await db.shifts.find({"date": {"$gte": (datetime.now(TZ).date() - timedelta(days=62)).isoformat()}}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     week_sales = await list_items("sales", week_start, None)
@@ -131,7 +141,7 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -342,12 +352,92 @@ async def order_list():
 async def apply_purchases(doc: Dict[str, Any], sign: int, reason: str) -> None:
     moves = [{"inventory_id": p["inventory_id"], "delta": float(p["quantity"])} for p in doc.get("purchases", [])]
     await apply_moves(moves, sign, {"id": doc["id"], "product_name": ""}, reason)
+    increases = []
+    before = {p["id"]: p for p in await list_items("products", limit=None)}
     if sign > 0:
         for p in doc.get("purchases", []):
-            if float(p.get("unit_price", 0)) > 0:
-                await db.inventory.update_one({"id": p["inventory_id"]}, {"$set": {"unit_cost": float(p["unit_price"])}})
+            price = float(p.get("unit_price", 0))
+            if price > 0:
+                item = await db.inventory.find_one_and_update({"id": p["inventory_id"]}, {"$set": {"unit_cost": price}}, projection={"_id": 0})
+                old_price = float((item or {}).get("unit_cost", 0))
+                if item and old_price > 0 and price >= old_price * (1 + PRICE_ALERT_PCT / 100):
+                    increases.append((item, old_price, price))
     doc["stock_moves"] = moves if sign > 0 else []
     await recompute_product_costs()
+    for item, old_price, price in increases:
+        await create_price_alert(item, old_price, price, before)
+
+PRICE_ALERT_PCT = 10
+
+def _margin(price: float, cost: float) -> float:
+    return round((price - cost) / price * 100, 1) if price else 0
+
+async def create_price_alert(item: Dict[str, Any], old_price: float, new_price: float, before: Dict[str, Dict[str, Any]]) -> None:
+    affected = []
+    for product in await list_items("products", limit=None):
+        if any(r["inventory_id"] == item["id"] for r in product.get("recipe", [])):
+            old_cost = float(before.get(product["id"], product).get("cost", 0))
+            price = float(product.get("price", 0))
+            affected.append({"product_id": product["id"], "name": product["name"], "price": price, "old_cost": old_cost, "new_cost": float(product.get("cost", 0)),
+                             "old_margin": _margin(price, old_cost), "new_margin": _margin(price, float(product.get("cost", 0)))})
+    await db.price_alerts.insert_one({"id": str(uuid.uuid4()), "inventory_id": item["id"], "inventory_name": item["name"], "unit": item.get("unit", ""),
+        "old_price": old_price, "new_price": new_price, "change_pct": round((new_price - old_price) / old_price * 100, 1), "affected": affected,
+        "dismissed": False, "created_at": datetime.now(timezone.utc).isoformat()})
+
+@api.get("/price-alerts")
+async def price_alerts():
+    return await db.price_alerts.find({"dismissed": False}, {"_id": 0}).sort("created_at", -1).to_list(50)
+
+@api.post("/price-alerts/{alert_id}/dismiss")
+async def dismiss_price_alert(alert_id: str):
+    result = await db.price_alerts.update_one({"id": alert_id}, {"$set": {"dismissed": True}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Uyarı bulunamadı")
+    return {"ok": True}
+
+def suggested_price(product: Dict[str, Any]) -> float | None:
+    margin = float(product.get("target_margin") or 0) or 65
+    cost = float(product.get("cost", 0))
+    return math.ceil(cost / (1 - margin / 100)) if cost > 0 and margin < 100 else None
+
+@api.post("/products/apply-suggested")
+async def apply_suggested_prices(payload: Dict[str, List[str]]):
+    ids = set(payload.get("product_ids", []))
+    changed = []
+    for product in await list_items("products", limit=None):
+        price = suggested_price(product)
+        if product["id"] in ids and price and price != float(product.get("price", 0)):
+            await db.products.update_one({"id": product["id"]}, {"$set": {"price": price}})
+            changed.append({"id": product["id"], "name": product["name"], "old_price": product.get("price", 0), "new_price": price})
+    return {"updated": changed}
+
+def _expense_supplier(doc: Dict[str, Any], inventory: Dict[str, Dict[str, Any]]) -> str:
+    if doc.get("supplier"):
+        return doc["supplier"]
+    names = {inventory.get(p["inventory_id"], {}).get("supplier", "") for p in doc.get("purchases", [])} - {""}
+    return names.pop() if len(names) == 1 else ("Birden fazla tedarikçi" if names else "")
+
+@api.get("/suppliers/spending")
+async def supplier_spending(months: int = Query(6, ge=1, le=24)):
+    today = datetime.now(TZ).date().replace(day=1)
+    keys = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.insert(0, f"{y}-{m:02d}")
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    since = _day_start(date_cls.fromisoformat(keys[0] + "-01")).astimezone(timezone.utc).isoformat()
+    inventory = {i["id"]: i for i in await list_items("inventory", limit=None)}
+    rows: Dict[str, Dict[str, Any]] = {}
+    for exp in await list_items("expenses", since, None):
+        supplier = _expense_supplier(exp, inventory)
+        if not supplier:
+            continue
+        month = datetime.fromisoformat(exp["created_at"]).astimezone(TZ).strftime("%Y-%m")
+        row = rows.setdefault(supplier, {"supplier": supplier, "months": {k: 0 for k in keys}, "total": 0, "count": 0})
+        row["months"][month] = round(row["months"].get(month, 0) + float(exp.get("amount", 0)), 2)
+        row["total"] = round(row["total"] + float(exp.get("amount", 0)), 2)
+        row["count"] += 1
+    return {"months": keys, "rows": sorted(rows.values(), key=lambda r: -r["total"])}
 
 def _purchase_total(doc: Dict[str, Any]) -> None:
     if doc.get("purchases") and not float(doc.get("amount", 0)):
@@ -415,6 +505,8 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         if name == "expenses" and old.get("purchases"):
             await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
+        if name == "staff":
+            await db.shifts.delete_many({"staff_id": item_id})
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
             await recompute_product_costs()
