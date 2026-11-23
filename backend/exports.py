@@ -19,7 +19,7 @@ pdfmetrics.registerFont(TTFont("Sans", str(FONT_DIR / "NotoSans-Regular.ttf")))
 pdfmetrics.registerFont(TTFont("Sans-Bold", str(FONT_DIR / "NotoSans-Bold.ttf")))
 pdfmetrics.registerFontFamily("Sans", normal="Sans", bold="Sans-Bold", italic="Sans", boldItalic="Sans-Bold")
 
-PERIOD_LABELS = {"daily": "Günlük", "weekly": "Haftalık", "monthly": "Aylık"}
+PERIOD_LABELS = {"daily": "Günlük", "weekly": "Haftalık", "monthly": "Aylık", "custom": "Özel Aralık"}
 AMBER = "D97706"
 
 
@@ -38,7 +38,7 @@ def _sections(report: dict) -> list:
         ("Dönem Özeti", ["Kalem", "Tutar"], [
             ["Toplam ciro", report["revenue"]], ["Toplam gider", report["expenses"]],
             ["Net kâr", report["profit"]], ["Satış adedi (işlem)", report["sales_count"]]]),
-        ("Kasa Mutabakatı (Bugün)", ["Kalem", "Tutar"], [
+        ("Kasa Mutabakatı (" + report["reconciliation"]["date"] + ")", ["Kalem", "Tutar"], [
             ["Açılış kasası", rec["opening"]], ["+ Günlük satış", rec["sales"]], ["− Günlük gider", rec["expenses"]],
             ["Beklenen kapanış", rec["expected_closing"]], ["Gerçek kapanış", rec["actual_closing"]], ["Fark", rec["difference"]]]),
         ("Ürün Performansı", ["Ürün", "Adet", "Ciro", "Maliyet", "Kâr"], [
