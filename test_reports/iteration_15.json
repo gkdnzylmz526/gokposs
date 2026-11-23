@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 15: staff role, audit log, PWA. Backend: 32/33 pytest pass (new file test_iteration15_staff_audit_pwa.py). All staff allowed routes work and every other route returns 403 for staff: dashboard, reports, sales GET/PUT/DELETE, expenses, products POST, inventory GET/PUT, stock-movements, payroll, audit-logs, users, role PATCH. If staff sends unit_price=1, the server ignores it and stores qty×product.price (2×120=240) plus the recipe stock deduction. A missing or unknown product_id returns 422. For count: a negative quantity returns 422, an unknown id returns 404, and a save writes the quantity and a 'Stok sayımı' movement. Audit rows are written for admin Ekledi/Düzenledi/Sildi and staff Ekledi/Saydı with the right user_email and role. The collection, user_email and limit filters work, rows are sorted newest first, and a pure member gets 403. PWA files are correct: manifest, icons, sw.js and index.html. UI on mobile at 390px as staff: StaffApp renders and staff cannot reach the dashboard. +/− and the channel picker work, a 2-item sale saves (stock 20→19.5) and the cart resets, and the stock count saves (19.5→18.5). The SW is registered, the title is 'GÖKBOSS POS' and lang is tr. UI on desktop as admin: all 10 nav tabs load. Kullanıcılar shows audit rows with the 'personel' badge, both filters work and the role select can set staff and back. Found 1 failing backend test (staff negative quantity) and a missing Toaster in StaffApp.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/sales (staff)", "issue": "No quantity validation. Staff can POST quantity -5 and it is stored with amount -600 ₺, and recipe stock is ADDED back. Staff can push negative revenue or inflate stock. Fix: require quantity > 0 at least for staff (e.g. Field(gt=0) or a check in the staff branch). Staff-supplied id/created_at are also accepted, so a staff user can backdate sales; override them for staff.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/sales (staff)", "issue": "The response (response_model=SalesEntry) includes unit_cost (e.g. 2.5 from the recipe). This shows cost data to staff, even though /staff-view hides cost."},
+      {"endpoint": "PATCH /api/users/{id}/role", "issue": "Role changes are not written to audit_logs. These are security-relevant actions and should probably be logged."},
+      {"endpoint": "POST /api/sales (staff)", "issue": "Staff can sell an inactive product (active=false) through the API. The UI hides inactive products but the backend does not check."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StaffApp", "issue": "No <Toaster/> is mounted. Sonner's Toaster only exists in the admin App.js, so staff never see 'N satış kaydedildi', 'sayımı kaydedildi' or any error toast ('Menü ürünü seçin', 'Satış kaydedilemedi', 'Veriler yüklenemedi'). Verified: no [data-sonner-toast] appeared after a save. Fix: render <Toaster position=\"top-center\" richColors /> inside StaffApp.", "selector": "[data-testid='staff-app']", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Staff multi-item submit", "issue": "Items are posted one by one. If item 2 of 3 fails, item 1 is already saved but the cart is not cleared, so a retry creates duplicate sales. With no toast, the staff user gets no feedback at all.", "affected_selectors": ["[data-testid='staff-sales-submit']"]},
+      {"flow": "AuditLog panel", "issue": "It loads only on mount or when a filter changes, with no refresh after a role change. The user-filter options are built from the already-filtered logs, so after picking a user (or a collection) the dropdown shrinks to just that subset.", "affected_selectors": ["[data-testid='audit-filter-user']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration15_staff_audit_pwa.py", "/app/backend/tests/ui_setup_it15.py", "/app/test_reports/pytest/pytest_iter15.xml"],
+  "action_items": [
+    "Add a <Toaster/> to StaffApp.jsx so staff get success and error feedback",
+    "Validate quantity > 0 for staff sales, and ignore client id/created_at for staff (and ideally check product.active)",
+    "Remove unit_cost/stock_moves from the staff POST /sales response (return a reduced model for staff)",
+    "Optional: audit role changes; make the AuditLog user-filter options independent of the current filter",
+    "Update stale test_iteration14_auth_roles.py: it expects roles == ['admin','member'] and the member account to have role 'member'. Its role-toggle test resets gokboss-member to 'member', which breaks staff tests if both files run together. I restored the account to 'staff' afterwards."
+  ],
+  "critical_code_review_comments": [
+    "staff_allowed uses a regex fullmatch on request.url.path; [\\w-]+ is fine for uuids",
+    "The staff override in make_crud is good. The quantity is still trusted, so negative or 0 values give negative or zero revenue and reverse stock.",
+    "index.html changes were not served until the frontend restarted (the CRA dev server cached the old template with lang=en and title 'Emergent | Fullstack App'). I restarted the frontend and it is now correct. The production build is unaffected.",
+    "sw.js has an empty fetch handler. Chrome may log a 'no-op fetch handler' warning, which is harmless; installability is OK."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration15_staff_audit_pwa.py", "/app/backend/tests/ui_setup_it15.py"],
+  "success_rate": {"backend": "97% (32/33)", "frontend": "90% (all flows work; the staff app has no toast feedback)"},
+  "seed_data_creation": "None left behind. I created TEST_it15_* and TEST_UI_* products and inventory, their sales, stock_movements and audit_logs (+clerk_test users only, after 16:05), and a temporary Clerk user gokboss-it15-member+clerk_test@example.com (pure member), and deleted all of them. I did not touch the owner's products 'adana'/'Ayran', the inventory 'Ayran' or the owner account. gokboss-member is back to role 'staff'.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run tests/test_iteration15_staff_audit_pwa.py. It needs gokboss-member to be 'staff', so do NOT run it together with test_iteration14 until iteration14 is updated, because its role toggle resets the role to member. PURE_MEMBER_EMAIL is auto-created through Clerk; delete it afterwards (Clerk DELETE /users/{id} plus the db.users row). For UI, run tests/ui_setup_it15.py, which prints product/inventory ids and sign-in tickets; clean up with 'cleanup <prod> <inv>'. The real owner gkdnzylmz5261@gmail.com uses the preview, so never touch their data."
+}

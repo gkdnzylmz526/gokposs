@@ -10,7 +10,8 @@ export const AuditLog = () => {
   const [collection, setCollection] = useState("");
   const [user, setUser] = useState("");
   useEffect(() => { axios.get(`${API}/audit-logs`, { params: { ...(collection && { collection }), ...(user && { user_email: user }) } }).then(({ data }) => setLogs(data)).catch(() => setLogs([])); }, [collection, user]);
-  const users = [...new Set(logs.map((l) => l.user_email).filter(Boolean))];
+  const [users, setUsers] = useState([]);
+  useEffect(() => { axios.get(`${API}/users`).then(({ data }) => setUsers(data.users.map((u) => u.email).filter(Boolean))).catch(() => {}); }, []);
   const grid = { gridTemplateColumns: "1fr 1.3fr .7fr .8fr 2.4fr" };
   return (
     <section className="panel table-panel audit-panel" data-testid="audit-log">

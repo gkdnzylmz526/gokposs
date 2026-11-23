@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
 import { UserButton } from "@clerk/react";
 import { Boxes, Minus, Plus, ReceiptText, Save } from "lucide-react";
 
@@ -15,9 +15,9 @@ function SalesEntry({ products, onSaved }) {
   const submit = async () => {
     setSaving(true);
     try {
-      for (const [id, quantity] of items) await axios.post(`${API}/sales`, { product_id: id, product_name: products.find((p) => p.id === id)?.name, quantity, channel });
-      toast.success(`${items.length} satış kaydedildi`); setCart({}); onSaved();
-    } catch (e) { toast.error(e.response?.data?.detail || "Satış kaydedilemedi"); } finally { setSaving(false); }
+      for (const [id, quantity] of items) { await axios.post(`${API}/sales`, { product_id: id, product_name: products.find((p) => p.id === id)?.name, quantity, channel }); setCart((c) => ({ ...c, [id]: 0 })); }
+      toast.success(`${items.length} satış kaydedildi`); onSaved();
+    } catch (e) { const d = e.response?.data?.detail; toast.error(typeof d === "string" ? d : "Satış kaydedilemedi; kaydedilenler sepetten çıkarıldı"); onSaved(); } finally { setSaving(false); }
   };
   return (
     <section data-testid="staff-sales">
@@ -63,6 +63,7 @@ export default function StaffApp() {
   useEffect(() => { load(); }, []);
   return (
     <div className="staff-app" data-testid="staff-app">
+      <Toaster position="top-center" richColors />
       <header className="staff-header"><div className="brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span>Personel</span></div></div><UserButton /></header>
       <nav className="staff-tabs">
         <button className={tab === "sales" ? "active" : ""} data-testid="staff-tab-sales" onClick={() => setTab("sales")}><ReceiptText size={16} /> Satış gir</button>

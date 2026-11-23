@@ -125,7 +125,7 @@ class Entry(BaseModel):
 class SalesEntry(Entry):
     product_id: str = ""
     product_name: str = ""
-    quantity: float = 1
+    quantity: float = Field(default=1, gt=0)
     unit_price: float = 0
     unit_cost: float = 0
     channel: str = "Salon"

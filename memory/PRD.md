@@ -125,3 +125,9 @@
 - Emergent-managed Clerk auth (email+password). Admin-only dashboard (roles admin/member, ADMIN_EMAIL=gkdnzylmz5261@gmail.com), Users page, router-level guard; public /izin and cron excluded.
 - Leave request email notification; monthly summary email (cron 1st 09:00 Istanbul).
 - Tested iteration_14.json: 32/32 auth tests + regressions pass; minor UI fixes.
+
+## Iteration 15 (Haziran 2026)
+- 'staff' role: mobile StaffApp (sales entry + stock count only), server-enforced allowlist & price override.
+- Audit log (audit_logs) for all CRUD + key actions; panel on Kullanıcılar page.
+- PWA: manifest, icons, service worker, iOS meta.
+- Tested iteration_15.json; fixed sale quantity validation, staff toasts, audit user filter.
