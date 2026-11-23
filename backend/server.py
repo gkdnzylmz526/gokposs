@@ -77,7 +77,7 @@ async def current_member(request: Request) -> Dict[str, Any]:
 
 STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel)"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
-ALL_MODE_WRITES = ("/api/products", "/api/suppliers", "/api/users", "/api/email", "/api/price-alerts", "/api/leave-requests", "/api/staff/")
+ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -94,6 +94,12 @@ def _label(collection: str, doc: Dict[str, Any] | None) -> str:
         return f"{doc.get('date', '')} {doc.get('start', '')}{'–' + doc['end'] if doc.get('end') else ''} {doc.get('type', '')}".strip()
     if collection == "orders":
         return f"{doc.get('supplier', '')} · {doc.get('status', '')}"
+    if collection == "attendance":
+        return f"{doc.get('date', '')} {doc.get('start', '')}–{doc.get('end') or '…'}"
+    if collection == "tips":
+        return f"{doc.get('date', '')} · {doc.get('amount', 0):g} ₺{' · ' + doc['note'] if doc.get('note') else ''}"
+    if collection == "tables":
+        return f"Masa {doc.get('name', '')}"
     return str(doc.get("name") or doc.get("supplier") or doc.get("id", ""))
 
 async def audit(request: Request, action: str, collection: str, item_id: str, doc: Dict[str, Any] | None = None, detail: str = "") -> None:
@@ -118,7 +124,7 @@ async def dashboard_guard(request: Request) -> None:
     rid = request.headers.get("x-restaurant") or DEFAULT_RESTAURANT
     if rid not in RESTAURANT_IDS and rid != "all":
         raise HTTPException(status_code=400, detail="Geçersiz restoran")
-    if rid == "all" and request.method != "GET" and not request.url.path.startswith(ALL_MODE_WRITES):
+    if rid == "all" and request.method != "GET" and not re.fullmatch(ALL_MODE_WRITES, request.url.path):
         raise HTTPException(status_code=400, detail="Bu işlem için üstten bir restoran seçin")
     current_rid.set(rid)
 
@@ -1033,6 +1039,12 @@ async def payroll_slip(staff_id: str, month: str | None = MONTH):
     name = re.sub(r"[^A-Za-z0-9]+", "-", row["name"].translate(str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU"))).strip("-").lower() or "personel"
     return Response(build_payslip_pdf(row, data), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="bordro-{name}-{data["month"]}.pdf"'})
 
+async def validate_attendance(doc: Dict[str, Any]) -> None:
+    if not await db.staff.find_one({"id": doc["staff_id"]}):
+        raise HTTPException(status_code=422, detail="Personel bu restoranda bulunamadı")
+    if doc.get("end") and shift_hours(doc) > 16:
+        raise HTTPException(status_code=422, detail="Çıkış saati girişten önce görünüyor (16 saatten uzun mesai kabul edilmez)")
+
 def _now_hm() -> str:
     return datetime.now(TZ).strftime("%H:%M")
 
@@ -1094,10 +1106,18 @@ async def table_close(table_id: str, body: TableCloseIn, request: Request):
         if order:
             await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Açık"}})
         raise HTTPException(status_code=422, detail="Masada kapatılacak ürün yok")
-    for i in order["items"]:
-        sale = SalesEntry(product_id=i["product_id"], product_name=i["product_name"], quantity=i["quantity"], unit_price=i["unit_price"], channel="Salon",
-                          payment=body.payment, amount=round(i["quantity"] * i["unit_price"], 2), note=f"Masa {table['name']}").model_dump()
-        await insert_sale(sale, request)
+    pending = list(order["items"])
+    try:
+        while pending:
+            i = pending[0]
+            sale = SalesEntry(product_id=i["product_id"], product_name=i["product_name"], quantity=i["quantity"], unit_price=i["unit_price"], channel="Salon",
+                              payment=body.payment, amount=round(i["quantity"] * i["unit_price"], 2), note=f"Masa {table['name']}").model_dump()
+            await insert_sale(sale, request)
+            pending.pop(0)
+    except Exception:
+        total = round(sum(i["quantity"] * i["unit_price"] for i in pending), 2)
+        await db.table_orders.update_one({"id": order["id"]}, {"$set": {"status": "Açık", "items": pending, "total": total}})
+        raise
     if body.tip > 0:
         tip = TipEntry(date=datetime.now(TZ).date().isoformat(), amount=body.tip, note=f"Masa {table['name']} · {body.payment}").model_dump()
         await db.tips.insert_one({**tip})
@@ -1223,6 +1243,8 @@ def make_crud(name: str, model: type[BaseModel]):
         doc = item.model_dump()
         if name in SCOPED:
             specific_rid()
+        if name == "attendance":
+            await validate_attendance(doc)
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "sales" and getattr(request.state, "member", {}).get("role") == "staff":
@@ -1251,6 +1273,8 @@ def make_crud(name: str, model: type[BaseModel]):
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
+        if name == "attendance":
+            await validate_attendance(doc)
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "expenses" and (old.get("purchases") or doc.get("purchases")):
@@ -1287,6 +1311,8 @@ def make_crud(name: str, model: type[BaseModel]):
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
     async def delete_item(item_id: str, request: Request):
+        if name == "tables" and await db.table_orders.find_one({"table_id": item_id, "status": {"$in": ["Açık", "Kapanıyor"]}}):
+            raise HTTPException(status_code=409, detail="Masada açık hesap var; önce hesabı kapatın veya iptal edin")
         old = await db[name].find_one_and_delete({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
@@ -1299,7 +1325,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "orders" and old.get("expense_id"):
             await remove_expense(old["expense_id"])
         if name == "staff":
-            for related in ("shifts", "leaves", "advances", "leave_requests"):
+            for related in ("shifts", "leaves", "advances", "leave_requests", "attendance"):
                 await db[related].delete_many({"staff_id": item_id})
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")

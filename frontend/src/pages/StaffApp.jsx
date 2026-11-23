@@ -76,7 +76,7 @@ export default function StaffApp({ me }) {
         <button className={tab === "sales" ? "active" : ""} data-testid="staff-tab-sales" onClick={() => setTab("sales")}><ReceiptText size={16} /> Satış gir</button>
         <button className={tab === "stock" ? "active" : ""} data-testid="staff-tab-stock" onClick={() => setTab("stock")}><Boxes size={16} /> Stok sayımı</button>
       </nav>
-      <main className="staff-main">{tab === "tables" ? <TablesBoard refreshKey={data} /> : tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
+      <main className="staff-main">{tab === "tables" ? <TablesBoard refreshKey={data} onChanged={load} /> : tab === "sales" ? <SalesEntry products={data.products} myToday={data.my_today || []} onSaved={load} /> : <StockCount inventory={data.inventory} onSaved={load} />}</main>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import axios from "axios";
 import { History } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const LABELS = { sales: "Satış", expenses: "Gider", inventory: "Stok", staff: "Personel", cash: "Kasa", products: "Menü", suppliers: "Tedarikçi", shifts: "Vardiya", leaves: "İzin", advances: "Avans", orders: "Sipariş", leave_requests: "İzin talebi" };
+const LABELS = { sales: "Satış", expenses: "Gider", inventory: "Stok", staff: "Personel", cash: "Kasa", products: "Menü", suppliers: "Tedarikçi", shifts: "Vardiya", leaves: "İzin", advances: "Avans", orders: "Sipariş", leave_requests: "İzin talebi", tables: "Masa", tips: "Bahşiş", attendance: "Giriş-çıkış", waste: "Fire", users: "Kullanıcı" };
 
 export const AuditLog = () => {
   const [logs, setLogs] = useState([]);

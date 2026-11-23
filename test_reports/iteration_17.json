@@ -1,0 +1,49 @@
+{
+  "summary": "Tested multi-restaurant scoping, tables (Masa Takibi), tips distribution, attendance clock in/out + payroll, staff restaurant binding, restaurants summary, product costs (backend + admin UI + staff mobile UI). New suite tests/test_iteration17_multi_restaurant.py: 19/19 pass. Isolation, 'all' union, all-mode write block, invalid restaurant 400, shared products, cross-restaurant recipe deduction (Turkish case-insensitive same-name), per-restaurant unit_cost, avg Product.cost, table items/close/cancel, tip saving, tips split by hours, assignment 422/409, staff header override, payroll hours_source and leave link approval all work. Regressions it15+it16+it17 together: 63/63 pass. UI: restaurant switcher, breadcrumb, all-mode banner, summary cards, Masalar flow, Ürün Maliyeti table + calculator + create product, attendance/tips panels, Users selects, and the staff app (restaurant name, clock card, unlinked card, tables/sales/stock tabs) all work. Main issue: after a table bill is closed, the dashboard data (Satışlar, overview, stock) does not refresh.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/tables/{id}", "issue": "Deleting a table that has an open order leaves an orphan 'Açık' table_order. /api/restaurants/summary open_tables stays too high for good, and the order cannot be cancelled because the table returns 404. Reproduced: open_tables went 0 -> 1 after the delete. Fix: return 409 when an open order exists, or cancel/delete the order in delete_item for tables."},
+      {"endpoint": "dashboard_guard ALL_MODE_WRITES", "issue": "The '/api/staff/' prefix lets PUT and DELETE /api/staff/{id} pass in X-Restaurant: all mode (PUT returned 404, not 400). DELETE cascades shifts, leaves and advances. Only /api/staff/{id}/request-link should be allowed. Use a regex like ^/api/staff/[^/]+/request-link$."},
+      {"endpoint": "POST/PUT /api/attendance", "issue": "staff_id is not checked: an unknown staff id, or staff from another restaurant, is accepted. end < start is accepted and counted as an overnight shift (09:00-08:00 = 23h). Consider validating both."},
+      {"endpoint": "POST /api/tables/{id}/close", "issue": "Not atomic. If insert_sale raises part-way through the item loop, the order stays in status 'Kapanıyor' with some sales already written, and no endpoint can recover it."},
+      {"endpoint": "DELETE /api/staff/{id}", "issue": "The cascade removes shifts, leaves, advances and leave_requests but not attendance records."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Tables tile", "issue": "A long table name (e.g. TEST_UI17_M5) overflows the tile border on desktop and mobile.", "selector": "[data-testid^='table-tile-']", "priority": "LOW"},
+      {"component": "EntryModal (Yeni masa)", "issue": "'Kişi sayısı' input is empty even though the field has default: 4. EntryModal ignores field.default. The backend falls back to 4, so this is UX only.", "selector": "[data-testid='seats-field'] input", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Admin Masalar -> close bill -> Satışlar", "issue": "TablesBoard reloads only /api/tables-view after close or cancel. The Dashboard /api/dashboard data is not reloaded, so the new sale is missing from Satışlar, the overview and stock until a full page reload or a restaurant switch. Verified: the sale exists in the API but Satışlar did not show it. Fix: pass the Dashboard load (and StaffApp load) into TablesBoard as an onChange callback and call it after close or cancel.", "affected_selectors": ["[data-testid='table-close-button']", "[data-testid='nav-sales']"]},
+      {"flow": "Staff app tables tab -> close bill", "issue": "Same root cause: staff-view is not reloaded, so 'Bugün sattıklarım' and the stock tab stay stale after a table closes.", "affected_selectors": ["[data-testid='staff-today']", "[data-testid='staff-stock']"]}
+    ],
+    "design_issues": [
+      {"screen": "Ürün Maliyeti calculator", "issues": ["The 'Malzeme ekle' (calc-add-row) Plus icon sits on its own line, away from the label.", "In calc-real-margin the '%' is large and the number is tiny."]},
+      {"screen": "Kullanıcılar > İşlem geçmişi", "issues": ["attendance, tips and tables audit rows show a raw UUID as detail (_label has no case for these collections).", "Section names 'attendance' and 'tips' are not translated."]},
+      {"screen": "Staff app (390px)", "issues": ["The 'Stok sayımı' tab touches the right screen edge."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration17_multi_restaurant.py", "/app/backend/tests/ui_setup_it17.py", "/app/test_reports/pytest/pytest_it17.xml"],
+  "action_items": [
+    "Refresh dashboard and staff-view data after a table bill is closed or cancelled (pass an onChange/onReload prop into TablesBoard).",
+    "Handle deleting a table that has an open order: block it with 409, or cancel the order. Otherwise open_tables in the summary is too high for good.",
+    "Narrow ALL_MODE_WRITES '/api/staff/' to the request-link route only.",
+    "Optional: validate attendance staff_id against the current restaurant, include attendance in the staff delete cascade, make table close recoverable, and add audit labels for tips, attendance and tables.",
+    "Update stale test tests/test_iteration14_auth_roles.py. It expects roles ['admin','member'] and resets the member account to role 'member', which breaks it15 and it16 staff tests in a full-suite run. Also, the it15 and it16 cleanup deletes sales without an X-Restaurant header, so sales leak when the member is assigned to another restaurant."
+  ],
+  "critical_code_review_comments": [
+    "Scoping via ContextVar + ScopedCollection works. Watch for any new db.<scoped>.aggregate() call: __getattr__ passes it through without a restaurant filter.",
+    "local_inventory() calls list_items('inventory') for every recipe line of every sale. That is O(n) per ingredient; cache it per request or index on (restaurant_id, name).",
+    "In table_add_item, two concurrent first-adds to an empty table could create two open orders (no unique index on table_id+status). A 5-thread test did not reproduce it, but a partial unique index is advisable.",
+    "attendance_clock computes _now_hm() twice, so the audit and response time can differ by a minute at a boundary."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration17_multi_restaurant.py", "/app/backend/tests/ui_setup_it17.py"],
+  "success_rate": {"backend": "100% of new tests (19/19); it15+it16+it17 63/63; full suite 196/213, all 17 failures from stale it14 role expectations/test order and cron/email env tests", "frontend": "~93% (all requested flows work; 1 stale-data integration issue)"},
+  "seed_data_creation": "Created only TEST_ data (inventory, products, staff, tables, tips, attendance, shifts, sales, leave request) in etiler-marmaris/florya. All deleted by id. Orphan or closed table_orders of my TEST tables were deleted from Mongo by specific table_name. Member account restored to role staff, restaurant florya-tasfirin, staff_id ''. Leaked TEST_it15/it16 sales from my regression run (in etiler) were deleted. Real product 'adana' untouched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env|cut -d= -f2); pytest tests/test_iteration17_multi_restaurant.py -n 0. Do not run test_iteration14 together with it15/16 unless it14 is fixed, because it sets the member role to 'member'. After it14, restore with PATCH /api/users/{member_uid}/role {role: staff}. For UI: python3 tests/ui_setup_it17.py > /tmp/ui17.json, which assigns the member to etiler. Tickets are single-use, so regenerate them for each browser run. Clean up with python3 tests/ui_setup_it17.py cleanup \"$(cat /tmp/ui17.json)\". Clerk JWTs expire in about 60s; re-fetch the token in long scripts. Closed table_orders have no delete API.",
+  "test_credentials": "From /app/memory/test_credentials.md (admin + member/staff clerk_test accounts); valid."
+}

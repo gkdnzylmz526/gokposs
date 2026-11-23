@@ -63,7 +63,7 @@ function Field({ field, value, onChange, inventory, autoFocus }) {
 }
 
 export const EntryModal = ({ title, fields, initial, inventory, onClose, onSave }) => {
-  const [form, setForm] = useState(() => ({ ...Object.fromEntries(fields.filter((f) => f.type === "select" && f.required && f.options.length).map((f) => [f.key, f.options[0]])), ...(initial || {}) }));
+  const [form, setForm] = useState(() => ({ ...Object.fromEntries(fields.filter((f) => f.default != null && !initial?.id).map((f) => [f.key, f.default])), ...Object.fromEntries(fields.filter((f) => f.type === "select" && f.required && f.options.length).map((f) => [f.key, f.options[0]])), ...(initial || {}) }));
   const editing = Boolean(initial?.id);
   return (
     <div className="modal-backdrop">

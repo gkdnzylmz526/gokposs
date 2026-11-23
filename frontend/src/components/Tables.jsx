@@ -20,15 +20,15 @@ function ProductPicker({ products, onPick }) {
   );
 }
 
-function OrderPanel({ table, products, onChange, onClose }) {
+function OrderPanel({ table, products, onChange, onClose, onDone }) {
   const [payment, setPayment] = useState("Nakit");
   const [tip, setTip] = useState("");
   const [busy, setBusy] = useState(false);
   const order = table.order;
   const call = async (fn, ok) => { setBusy(true); try { await fn(); if (ok) toast.success(ok); await onChange(); } catch (e) { toast.error(errorText(e, "İşlem yapılamadı")); } finally { setBusy(false); } };
   const add = (productId, quantity) => call(() => axios.post(`${API}/tables/${table.id}/items`, { product_id: productId, quantity }));
-  const close = () => call(async () => { await axios.post(`${API}/tables/${table.id}/close`, { payment, tip: Number(tip || 0) }); setTip(""); onClose(); }, `Masa ${table.name} hesabı kapandı`);
-  const cancel = () => window.confirm("Açık hesap iptal edilsin mi? Satış kaydı oluşmaz.") && call(async () => { await axios.post(`${API}/tables/${table.id}/cancel`); onClose(); }, "Hesap iptal edildi");
+  const close = () => call(async () => { await axios.post(`${API}/tables/${table.id}/close`, { payment, tip: Number(tip || 0) }); setTip(""); onClose(); onDone?.(); }, `Masa ${table.name} hesabı kapandı`);
+  const cancel = () => window.confirm("Açık hesap iptal edilsin mi? Satış kaydı oluşmaz.") && call(async () => { await axios.post(`${API}/tables/${table.id}/cancel`); onClose(); onDone?.(); }, "Hesap iptal edildi");
   return (
     <div className="table-order" data-testid="table-order-panel">
       <div className="panel-head"><div><h3>Masa {table.name}</h3><span className="muted">{order ? `Açık · ${since(order.opened_at)}` : "Boş masa · ürün ekleyince hesap açılır"}</span></div><button className="icon-button" data-testid="table-order-close" onClick={onClose}><X size={16} /></button></div>
@@ -53,7 +53,7 @@ function OrderPanel({ table, products, onChange, onClose }) {
   );
 }
 
-export const TablesBoard = ({ onAddTable, onEditTable, onDeleteTable, refreshKey }) => {
+export const TablesBoard = ({ onAddTable, onEditTable, onDeleteTable, onChanged, refreshKey }) => {
   const [data, setData] = useState({ tables: [], products: [] });
   const [openId, setOpenId] = useState(null);
   const load = useCallback(() => axios.get(`${API}/tables-view`).then(({ data: d }) => setData(d)).catch((e) => toast.error(errorText(e, "Masalar yüklenemedi"))), []);
@@ -74,7 +74,7 @@ export const TablesBoard = ({ onAddTable, onEditTable, onDeleteTable, refreshKey
             </div>
           ))}
         </div>
-        {open && <OrderPanel table={open} products={data.products} onChange={load} onClose={() => setOpenId(null)} />}
+        {open && <OrderPanel table={open} products={data.products} onChange={load} onDone={onChanged} onClose={() => setOpenId(null)} />}
       </div>
     </div>
   );
