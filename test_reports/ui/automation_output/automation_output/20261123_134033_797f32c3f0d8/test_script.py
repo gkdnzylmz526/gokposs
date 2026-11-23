@@ -1,0 +1,40 @@
+async def run_test(page, output_dir, page_url):
+    import os
+    from playwright.async_api import expect
+
+    try:
+        await page.set_viewport_size({"width": 390, "height": 844})
+        await page.goto("https://restoran-asistan--8vayy60i.preview.emergentagent.com", wait_until="networkidle")
+        await expect(page.locator("text=GÖKBOSS POS")).to_be_visible()
+        print("PASS: brand visible")
+        await page.locator('[data-testid="nav-products"]').click()
+        await expect(page.locator("text=Menü Ürünleri").first).to_be_visible()
+        await page.locator('[data-testid="add-products-button"]').click()
+        await expect(page.locator('[data-testid="entry-modal"]')).to_be_visible()
+        print("PASS: product navigation and modal")
+        await page.locator('[data-testid="close-modal-button"]').click()
+        await page.locator('[data-testid="nav-reports"]').click()
+        await expect(page.locator('[data-testid="report-daily-tab"]')).to_be_visible()
+        await page.locator('[data-testid="report-weekly-tab"]').click()
+        await expect(page.locator('[data-testid="report-weekly-tab"]')).to_have_class("report-tab active")
+        await page.locator('[data-testid="report-monthly-tab"]').click()
+        await expect(page.locator('[data-testid="report-monthly-tab"]')).to_have_class("report-tab active")
+        print("PASS: report period tabs")
+        await page.locator('[data-testid="export-report-button"]').click()
+        print("PASS: Excel export action")
+        await page.locator('[data-testid="print-report-button"]').click()
+        await page.wait_for_timeout(300)
+        print("PASS: PDF print action")
+        await page.locator('[data-testid="nav-cash"]').click()
+        await expect(page.locator("text=Gün sonu mutabakatı")).to_be_visible()
+        await page.locator('[data-testid="add-cash-button"]').click()
+        await expect(page.locator('[data-testid="entry-modal"]')).to_be_visible()
+        print("PASS: cash reconciliation and closing form")
+        await page.locator('[data-testid="close-modal-button"]').click()
+        errors = await page.evaluate("""() => Array.from(document.querySelectorAll('.error, [class*="error"], [id*="error"]')).map(el => el.textContent).join(', ')""")
+        print("No error messages found on the page" if not errors else f"Found error message: {errors}")
+        overflow = await page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth")
+        print("PASS: mobile no horizontal overflow" if not overflow else "FINDING: mobile horizontal overflow")
+    except Exception as e:
+        print(f"FINDING: {e}")
+        raise

@@ -3,12 +3,15 @@ import logging
 import os
 import uuid
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi.responses import Response
+
+from exports import build_excel, build_pdf
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -64,12 +67,16 @@ class ProductEntry(Entry):
 
 COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry}
 
-async def list_items(collection: str) -> List[Dict[str, Any]]:
-    return await db[collection].find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+async def list_items(collection: str, since: str | None = None, limit: int | None = 100) -> List[Dict[str, Any]]:
+    query = {"created_at": {"$gte": since}} if since else {}
+    return await db[collection].find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+def _total(items) -> float:
+    return sum(float(item.get("amount", 0)) for item in items)
 
 @api.get("/")
 async def root():
-    return {"message": "Restoran Asistanı hazır"}
+    return {"message": "GÖKBOSS POS hazır"}
 
 @api.get("/dashboard")
 async def dashboard():
@@ -79,18 +86,24 @@ async def dashboard():
     staff = await list_items("staff")
     cash = await list_items("cash")
     products = await list_items("products")
-    revenue = sum(float(item.get("amount", 0)) for item in sales)
-    spent = sum(float(item.get("amount", 0)) for item in expenses)
+    today = datetime.now(timezone.utc).date()
+    week_sales = await list_items("sales", (today - timedelta(days=6)).isoformat(), None)
+    week_expenses = await list_items("expenses", (today - timedelta(days=6)).isoformat(), None)
+    weekly = []
+    for offset in range(6, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        weekly.append({"date": day, "revenue": _total(i for i in week_sales if i["created_at"][:10] == day), "expenses": _total(i for i in week_expenses if i["created_at"][:10] == day)})
+    revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products}
 
-@api.get("/reports")
-async def reports(period: str = Query("daily", pattern="^(daily|weekly|monthly)$")):
+PERIOD = Query("daily", pattern="^(daily|weekly|monthly)$")
+
+async def build_report(period: str) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
-    days = {"daily": 1, "weekly": 7, "monthly": 30}[period]
-    cutoff = now.timestamp() - days * 86400
-    sales = [item for item in await list_items("sales") if _date_timestamp(item.get("created_at")) >= cutoff]
-    expenses = [item for item in await list_items("expenses") if _date_timestamp(item.get("created_at")) >= cutoff]
+    start = datetime.combine(now.date() - timedelta(days={"daily": 0, "weekly": 6, "monthly": 29}[period]), datetime.min.time(), timezone.utc)
+    sales = await list_items("sales", start.isoformat(), None)
+    expenses = await list_items("expenses", start.isoformat(), None)
     products = {}
     for item in sales:
         name = item.get("product_name") or item.get("note") or "Diğer satış"
@@ -100,28 +113,34 @@ async def reports(period: str = Query("daily", pattern="^(daily|weekly|monthly)$
         row["revenue"] += float(item.get("amount", 0))
         row["cost"] += quantity * float(item.get("unit_cost", 0))
         row["profit"] = row["revenue"] - row["cost"]
-    revenue = sum(float(item.get("amount", 0)) for item in sales)
-    spent = sum(float(item.get("amount", 0)) for item in expenses)
-    return {"period": period, "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales), "top_products": sorted(products.values(), key=lambda row: row["quantity"], reverse=True)[:10]}
+    revenue, spent = _total(sales), _total(expenses)
+    return {"period": period, "start": start.isoformat(), "end": now.isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales),
+            "top_products": sorted(products.values(), key=lambda row: row["quantity"], reverse=True), "sales": sales, "expenses_list": expenses}
 
-def _date_timestamp(value: str | None) -> float:
-    try:
-        return datetime.fromisoformat(value or "").timestamp()
-    except ValueError:
-        return 0
+@api.get("/reports")
+async def reports(period: str = PERIOD):
+    return await build_report(period)
+
+@api.get("/reports/export")
+async def export_report(period: str = PERIOD, format: str = Query("xlsx", pattern="^(xlsx|pdf)$")):
+    report = await build_report(period)
+    report["reconciliation"] = await cash_reconciliation()
+    name = f"gokboss-pos-{period}-rapor-{datetime.now(timezone.utc).date().isoformat()}.{format}"
+    if format == "pdf":
+        return Response(build_pdf(report), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    return Response(build_excel(report), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @api.get("/cash/reconciliation")
 async def cash_reconciliation(date: str | None = None):
     target = date or datetime.now(timezone.utc).date().isoformat()
     def same_day(item):
         return (item.get("created_at", "")[:10] == target)
-    sales = [item for item in await list_items("sales") if same_day(item)]
-    expenses = [item for item in await list_items("expenses") if same_day(item)]
-    cash_logs = [item for item in await list_items("cash") if same_day(item)]
-    opening = float(cash_logs[0].get("opening", 0)) if cash_logs else 0
-    actual = float(cash_logs[-1].get("closing", 0)) if cash_logs else 0
-    sales_total = sum(float(item.get("amount", 0)) for item in sales)
-    expenses_total = sum(float(item.get("amount", 0)) for item in expenses)
+    sales = [item for item in await list_items("sales", target, None) if same_day(item)]
+    expenses = [item for item in await list_items("expenses", target, None) if same_day(item)]
+    cash_logs = [item for item in await list_items("cash", target, None) if same_day(item)]
+    opening = float(cash_logs[-1].get("opening", 0)) if cash_logs else 0
+    actual = float(cash_logs[0].get("closing", 0)) if cash_logs else 0
+    sales_total, expenses_total = _total(sales), _total(expenses)
     expected = opening + sales_total - expenses_total
     return {"date": target, "opening": opening, "sales": sales_total, "expenses": expenses_total, "expected_closing": expected, "actual_closing": actual, "difference": actual - expected, "has_closing": bool(cash_logs)}
 
@@ -145,7 +164,7 @@ def make_crud(name: str, model: type[BaseModel]):
 for collection_name, collection_model in COLLECTIONS.items():
     make_crud(collection_name, collection_model)
 
-app = FastAPI(title="Restoran Asistanı API")
+app = FastAPI(title="GÖKBOSS POS API")
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
