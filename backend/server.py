@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import secrets
 import math
 import json
 import re
@@ -18,7 +19,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
-from exports import build_excel, build_pdf, build_payroll_excel
+from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
 from mailer import send_report_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -98,6 +99,13 @@ class OrderEntry(Entry):
     items: List[OrderItem] = []
     estimated_total: float = 0
     status: str = Field(default="Gönderildi", pattern="^(Gönderildi|Teslim alındı)$")
+    expense_id: str = ""
+
+class LeaveRequestIn(BaseModel):
+    start: date_cls
+    end: date_cls
+    type: str = Field(default="Yıllık izin", pattern="^(" + "|".join(LEAVE_TYPES) + ")$")
+    note: str = Field(default="", max_length=300)
 
 class SupplierEntry(Entry):
     name: str
@@ -121,6 +129,7 @@ class StaffEntry(Entry):
     hourly_wage: float = 0
     phone: str = ""
     annual_leave_days: float = 14
+    request_token: str = Field(default_factory=lambda: secrets.token_urlsafe(16))
 
 class CashEntry(Entry):
     opening: float = 0
@@ -164,6 +173,7 @@ async def dashboard():
     products = await list_items("products", limit=None)
     suppliers = await list_items("suppliers", limit=None)
     leaves = await db.leaves.find({}, {"_id": 0}).sort("date", 1).to_list(None)
+    leave_requests = await db.leave_requests.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     advances = await db.advances.find({}, {"_id": 0}).sort("date", -1).to_list(None)
     shifts = await db.shifts.find({}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
     today = datetime.now(TZ).date()
@@ -176,7 +186,7 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -598,6 +608,103 @@ async def fill_sale_cost(doc: Dict[str, Any]) -> None:
         product = await db.products.find_one({"id": doc["product_id"]}, {"_id": 0, "cost": 1})
         doc["unit_cost"] = float((product or {}).get("cost", 0))
 
+async def remove_expense(expense_id: str) -> None:
+    old = await db.expenses.find_one_and_delete({"id": expense_id}, {"_id": 0})
+    if old and old.get("purchases"):
+        await apply_purchases(old, -1, "Teslimat geri alındı (stoktan çıkarıldı)")
+
+async def sync_order_delivery(old: Dict[str, Any], doc: Dict[str, Any]) -> None:
+    if doc["status"] == "Teslim alındı" and not old.get("expense_id"):
+        purchases = [{"inventory_id": i["inventory_id"], "quantity": float(i["quantity"]), "unit_price": float(i.get("unit_price", 0))}
+                     for i in doc["items"] if i.get("inventory_id") and float(i.get("quantity", 0)) > 0]
+        expense = ExpenseEntry(category="Sipariş teslimi", supplier=doc["supplier"], note=f"Sipariş teslim alındı ({len(doc['items'])} kalem)", purchases=purchases).model_dump()
+        if purchases:
+            _purchase_total(expense)
+            await apply_purchases(expense, 1, f"Teslimat · {doc['supplier']}")
+        else:
+            expense["amount"] = float(doc.get("estimated_total", 0))
+        await db.expenses.insert_one({**expense})
+        doc["expense_id"] = expense["id"]
+    elif doc["status"] != "Teslim alındı" and old.get("expense_id"):
+        await remove_expense(old["expense_id"])
+        doc["expense_id"] = ""
+    else:
+        doc["expense_id"] = old.get("expense_id", "")
+
+def leave_balance(staff: Dict[str, Any], leaves: List[Dict[str, Any]]) -> Dict[str, float]:
+    year = str(datetime.now(TZ).year)
+    used = sum(1 for l in leaves if l["staff_id"] == staff["id"] and l.get("type") == "Yıllık izin" and l["date"].startswith(year))
+    total = float(staff.get("annual_leave_days", 14))
+    return {"total": total, "used": used, "remaining": total - used}
+
+async def staff_by_token(token: str) -> Dict[str, Any]:
+    staff = await db.staff.find_one({"request_token": token}, {"_id": 0}) if len(token) >= 16 else None
+    if not staff:
+        raise HTTPException(status_code=404, detail="Geçersiz veya süresi dolmuş link")
+    return staff
+
+@api.get("/public/leave/{token}")
+async def public_leave_info(token: str):
+    staff = await staff_by_token(token)
+    leaves = await db.leaves.find({"staff_id": staff["id"]}, {"_id": 0}).to_list(None)
+    requests = await db.leave_requests.find({"staff_id": staff["id"]}, {"_id": 0, "staff_id": 0}).sort("created_at", -1).to_list(20)
+    return {"name": staff["name"], "balance": leave_balance(staff, leaves), "requests": requests, "types": LEAVE_TYPES}
+
+@api.post("/public/leave/{token}")
+async def public_leave_request(token: str, body: LeaveRequestIn):
+    staff = await staff_by_token(token)
+    if body.end < body.start:
+        raise HTTPException(status_code=422, detail="Bitiş tarihi başlangıçtan önce olamaz")
+    if (body.end - body.start).days > 30:
+        raise HTTPException(status_code=422, detail="Tek talepte en fazla 31 gün seçilebilir")
+    if body.start < datetime.now(TZ).date() - timedelta(days=7):
+        raise HTTPException(status_code=422, detail="Geçmiş tarihler için talep gönderilemez")
+    if await db.leave_requests.count_documents({"staff_id": staff["id"], "status": "Bekliyor"}) >= 10:
+        raise HTTPException(status_code=429, detail="Çok fazla bekleyen talebiniz var")
+    doc = {"id": str(uuid.uuid4()), "staff_id": staff["id"], "start": body.start.isoformat(), "end": body.end.isoformat(), "days": (body.end - body.start).days + 1,
+           "type": body.type, "note": body.note, "status": "Bekliyor", "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.leave_requests.insert_one({**doc})
+    return {k: v for k, v in doc.items() if k != "staff_id"}
+
+@api.post("/staff/{staff_id}/request-link")
+async def staff_request_link(staff_id: str, regenerate: bool = False):
+    staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
+    if not staff:
+        raise HTTPException(status_code=404, detail="Personel bulunamadı")
+    token = staff.get("request_token")
+    if regenerate or not token:
+        token = secrets.token_urlsafe(16)
+        await db.staff.update_one({"id": staff_id}, {"$set": {"request_token": token}})
+    return {"token": token}
+
+@api.post("/leave-requests/{request_id}/{decision}")
+async def decide_leave_request(request_id: str, decision: str):
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=404, detail="Geçersiz işlem")
+    req = await db.leave_requests.find_one({"id": request_id, "status": "Bekliyor"}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Bekleyen talep bulunamadı")
+    created = 0
+    if decision == "approve":
+        day, end = date_cls.fromisoformat(req["start"]), date_cls.fromisoformat(req["end"])
+        while day <= end:
+            if not await db.leaves.find_one({"staff_id": req["staff_id"], "date": day.isoformat()}):
+                await db.leaves.insert_one({**LeaveEntry(staff_id=req["staff_id"], date=day.isoformat(), type=req["type"], note=req.get("note") or "İzin talebi").model_dump()})
+                created += 1
+            day += timedelta(days=1)
+    status = "Onaylandı" if decision == "approve" else "Reddedildi"
+    await db.leave_requests.update_one({"id": request_id}, {"$set": {"status": status, "decided_at": datetime.now(timezone.utc).isoformat()}})
+    return {"status": status, "created": created}
+
+@api.get("/payroll/{staff_id}/slip")
+async def payroll_slip(staff_id: str, month: str | None = MONTH):
+    data = await build_payroll(month or datetime.now(TZ).strftime("%Y-%m"))
+    row = next((r for r in data["rows"] if r["staff_id"] == staff_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Personel bulunamadı")
+    name = re.sub(r"[^A-Za-z0-9]+", "-", row["name"].translate(str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU"))).strip("-").lower() or "personel"
+    return Response(build_payslip_pdf(row, data), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="bordro-{name}-{data["month"]}.pdf"'})
+
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
     async def get_items():
@@ -635,6 +742,10 @@ def make_crud(name: str, model: type[BaseModel]):
                 doc["amount"] = 0
             _purchase_total(doc)
             await apply_purchases(doc, 1, f"Alış düzeltildi · {doc['category']}")
+        if name == "staff":
+            doc["request_token"] = old.get("request_token") or doc["request_token"]
+        if name == "orders":
+            await sync_order_delivery(old, doc)
         if name == "sales":
             await fill_sale_cost(doc)
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış düzeltildi (eski kayıt geri alındı)")
@@ -655,8 +766,10 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         if name == "expenses" and old.get("purchases"):
             await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
+        if name == "orders" and old.get("expense_id"):
+            await remove_expense(old["expense_id"])
         if name == "staff":
-            for related in ("shifts", "leaves", "advances"):
+            for related in ("shifts", "leaves", "advances", "leave_requests"):
                 await db[related].delete_many({"staff_id": item_id})
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")

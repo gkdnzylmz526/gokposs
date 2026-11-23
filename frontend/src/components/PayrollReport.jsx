@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Download, Wallet } from "lucide-react";
+import { Download, FileText, Wallet } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
@@ -22,6 +22,13 @@ export const PayrollReport = ({ refreshKey, onAddAdvance, onDeleteAdvance }) => 
       toast.success("Maaş raporu indirildi");
     } catch { toast.error("Maaş raporu indirilemedi"); }
   };
+  const slip = async (r) => {
+    try {
+      const { data: blob } = await axios.get(`${API}/payroll/${r.staff_id}/slip`, { params: { month }, responseType: "blob" });
+      const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `bordro-${r.name}-${month}.pdf`;
+      document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch { toast.error("Bordro indirilemedi"); }
+  };
   const grid = { gridTemplateColumns: "1.4fr .6fr .8fr .8fr 1fr 1fr 1fr 1fr 1.1fr" };
   const advances = (data?.rows || []).flatMap((r) => r.advances.map((a) => ({ ...a, name: r.name })));
   return (
@@ -38,7 +45,7 @@ export const PayrollReport = ({ refreshKey, onAddAdvance, onDeleteAdvance }) => 
         {!data?.rows.length && <div className="empty-state">Personel kaydı yok.</div>}
         {data?.rows.map((r, i) => (
           <div className="table-row" style={grid} key={r.staff_id} data-testid={`payroll-row-${i}`}>
-            <span><b>{r.name}</b><small className="muted block">{r.hourly_wage ? `${money(r.hourly_wage)}/saat` : "Saatlik ücret girilmemiş"}{r.leave_days ? ` · ${r.leave_days} gün izin` : ""}</small></span>
+            <span><b>{r.name}</b><small className="muted block">{r.hourly_wage ? `${money(r.hourly_wage)}/saat` : "Saatlik ücret girilmemiş"}{r.leave_days ? ` · ${r.leave_days} gün izin` : ""}</small><button className="text-button tiny" data-testid={`payroll-slip-${i}`} onClick={() => slip(r)}><FileText size={10} /> Bordro PDF</button></span>
             <span>{r.shift_count}</span><span>{num(r.regular_hours)} sa</span>
             <span className={r.overtime_hours ? "ot-text" : ""}>{num(r.overtime_hours)} sa</span>
             <span>{money(r.regular_pay)}</span><span className={r.overtime_pay ? "ot-text" : ""}>{money(r.overtime_pay)}</span>

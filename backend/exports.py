@@ -178,3 +178,39 @@ def build_payroll_excel(data: dict) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def build_payslip_pdf(row: dict, data: dict) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=18 * mm, bottomMargin=18 * mm, title=f"Bordro {row['name']}")
+    title = ParagraphStyle("t", fontName="Sans-Bold", fontSize=18, leading=22)
+    sub = ParagraphStyle("s", fontName="Sans", fontSize=10, textColor=colors.HexColor("#6B7280"), leading=14)
+    h2 = ParagraphStyle("h", fontName="Sans-Bold", fontSize=11, textColor=colors.HexColor(f"#{AMBER}"), spaceBefore=12, spaceAfter=6)
+    cell = ParagraphStyle("c", fontName="Sans", fontSize=9, leading=12)
+    month = datetime.fromisoformat(f"{data['month']}-01")
+    months = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+
+    def table(rows, widths, bold_last=False):
+        t = Table([[Paragraph(str(c), cell) for c in r] for r in rows], colWidths=widths)
+        style = [("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#E5E7EB")), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5), ("ALIGN", (-1, 0), (-1, -1), "RIGHT")]
+        if bold_last:
+            style += [("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#FEF3C7")), ("FONTNAME", (0, -1), (-1, -1), "Sans-Bold")]
+        t.setStyle(TableStyle(style))
+        return t
+
+    w = doc.width
+    story = [Paragraph("GÖKBOSS POS — Ücret Bordrosu", title), Paragraph(f"{months[month.month - 1]} {month.year} · {row['name']}{' · ' + row['task'] if row.get('task') else ''}", sub)]
+    story += [Paragraph("Çalışma özeti", h2), table([
+        ["Vardiya sayısı", row["shift_count"]], ["Normal çalışma", f"{row['regular_hours']:g} saat"], ["Fazla mesai", f"{row['overtime_hours']:g} saat"],
+        ["İzin günü", row["leave_days"]], ["Saatlik ücret", tl(row["hourly_wage"])]], [w * 0.65, w * 0.35])]
+    story += [Paragraph("Ödeme", h2), table([
+        ["Normal ücret", tl(row["regular_pay"])], [f"Fazla mesai ücreti (x{data['overtime_rate']:g})", tl(row["overtime_pay"])], ["Brüt toplam", tl(row["total_pay"])],
+        ["Avans kesintisi", f"− {tl(row['advance_total'])}"], ["NET ÖDENECEK", tl(row["net_pay"])]], [w * 0.65, w * 0.35], bold_last=True)]
+    if row["advances"]:
+        story += [Paragraph("Avanslar", h2), table([[datetime.fromisoformat(a["date"]).strftime("%d.%m.%Y"), a.get("note") or "—", tl(a["amount"])] for a in row["advances"]], [w * 0.25, w * 0.5, w * 0.25])]
+    if row["shifts"]:
+        story += [Paragraph("Vardiya detayı", h2), table([["Tarih", "Saat", "Süre", "Fazla mesai"]] + [[datetime.fromisoformat(s["date"]).strftime("%d.%m.%Y"), f"{s['start']}–{s['end']}", f"{s['hours']:g} sa", f"{s['overtime']:g} sa" if s["overtime"] else "—"] for s in row["shifts"]], [w * 0.3, w * 0.3, w * 0.2, w * 0.2])]
+    story += [Spacer(1, 24), Paragraph(f"Haftalık {data['weekly_limit']} saati aşan çalışma fazla mesai olarak hesaplanmıştır. Bu belge bilgilendirme amaçlıdır.", sub),
+              Spacer(1, 30), table([["İşveren imza", "Personel imza"]], [w * 0.5, w * 0.5])]
+    doc.build(story)
+    return buf.getvalue()

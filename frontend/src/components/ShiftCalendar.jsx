@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { addDays, format, parseISO, startOfWeek } from "date-fns";
 import { tr } from "date-fns/locale";
-import { CalendarOff, ChevronLeft, ChevronRight, Copy, MessageCircle, Plus, Send, X } from "lucide-react";
+import { Link2, CalendarOff, ChevronLeft, ChevronRight, Copy, MessageCircle, Plus, Send, X } from "lucide-react";
 import { BulkPlanDialog } from "@/components/BulkPlanDialog";
 import { waLink } from "@/lib/phone";
 import axios from "axios";
@@ -12,7 +12,7 @@ const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currenc
 
 const hours = (s) => { const [sh, sm] = s.start.split(":").map(Number); const [eh, em] = s.end.split(":").map(Number); let d = eh * 60 + em - (sh * 60 + sm); if (d < 0) d += 1440; return d / 60; };
 
-export const ShiftCalendar = ({ staff, shifts, leaves = [], onAdd, onEdit, onDelete, onReload }) => {
+export const ShiftCalendar = ({ staff, shifts, leaves = [], requests = [], onAdd, onEdit, onDelete, onReload }) => {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [copying, setCopying] = useState(false);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -20,6 +20,15 @@ export const ShiftCalendar = ({ staff, shifts, leaves = [], onAdd, onEdit, onDel
   const today = format(new Date(), "yyyy-MM-dd");
   const byCell = useMemo(() => shifts.reduce((all, s) => ({ ...all, [`${s.staff_id}|${s.date}`]: [...(all[`${s.staff_id}|${s.date}`] || []), s] }), {}), [shifts]);
   const leaveByCell = useMemo(() => Object.fromEntries(leaves.map((l) => [`${l.staff_id}|${l.date}`, l])), [leaves]);
+  const pendingByCell = useMemo(() => { const out = {}; requests.filter((r) => r.status === "Bekliyor").forEach((r) => { for (let d = parseISO(r.start); format(d, "yyyy-MM-dd") <= r.end; d = addDays(d, 1)) out[`${r.staff_id}|${format(d, "yyyy-MM-dd")}`] = r; }); return out; }, [requests]);
+  const shareLink = async (person, viaWhatsApp) => {
+    try {
+      const { data } = await axios.post(`${API}/staff/${person.id}/request-link`);
+      const url = `${window.location.origin}/izin/${data.token}`;
+      if (viaWhatsApp) { window.open(waLink(person.phone, `Merhaba ${person.name}, izin talebi göndermek için bu linki kullanabilirsin (sadece sana özel, kimseyle paylaşma): ${url}`), "_blank", "noopener"); return; }
+      await navigator.clipboard.writeText(url); toast.success("İzin talep linki kopyalandı");
+    } catch { toast.error("Link alınamadı"); }
+  };
   const year = String(new Date().getFullYear());
   const leaveBalance = (p) => { const used = leaves.filter((l) => l.staff_id === p.id && l.type === "Yıllık izin" && l.date.startsWith(year)).length; const total = Number(p.annual_leave_days ?? 14); return { used, total, remaining: total - used }; };
   const weekLabel = `${format(days[0], "d MMMM", { locale: tr })} – ${format(days[6], "d MMMM yyyy", { locale: tr })}`;
@@ -55,13 +64,15 @@ export const ShiftCalendar = ({ staff, shifts, leaves = [], onAdd, onEdit, onDel
             {staff.map((person) => {
               const total = weekHours(person);
               return [
-                <div key={person.id} className="shift-person" data-testid={`shift-person-${person.id}`}><b>{person.name}</b><small>{person.task || "—"} · {Number(total.toFixed(1)).toLocaleString("tr-TR")} saat</small><small className="pay" data-testid={`shift-pay-${person.id}`}>{person.hourly_wage ? `${money(weekPay(person).pay)} (${money(person.hourly_wage)}/saat)` : "Saatlik ücret girilmemiş"}</small>{weekPay(person).overtime > 0 && <small className="ot-text" data-testid={`shift-overtime-${person.id}`}>Fazla mesai: {Number(weekPay(person).overtime.toFixed(1)).toLocaleString("tr-TR")} saat{person.hourly_wage ? ` · ${money(weekPay(person).overtime * person.hourly_wage * 1.5)}` : ""}</small>}<small className="leave-balance" data-testid={`leave-balance-${person.id}`}>Yıllık izin: {leaveBalance(person).remaining} / {leaveBalance(person).total} gün kaldı</small><a className={`wa-mini ${person.phone ? "" : "disabled"}`} data-testid={`shift-whatsapp-${person.id}`} href={person.phone ? waLink(person.phone, planText(person)) : undefined} target="_blank" rel="noreferrer" title={person.phone ? "Haftalık planı WhatsApp'ta gönder" : "Telefon numarası girilmemiş"}><MessageCircle size={12} /> {person.phone ? "Planı gönder" : "Telefon yok"}</a></div>,
+                <div key={person.id} className="shift-person" data-testid={`shift-person-${person.id}`}><b>{person.name}</b><small>{person.task || "—"} · {Number(total.toFixed(1)).toLocaleString("tr-TR")} saat</small><small className="pay" data-testid={`shift-pay-${person.id}`}>{person.hourly_wage ? `${money(weekPay(person).pay)} (${money(person.hourly_wage)}/saat)` : "Saatlik ücret girilmemiş"}</small>{weekPay(person).overtime > 0 && <small className="ot-text" data-testid={`shift-overtime-${person.id}`}>Fazla mesai: {Number(weekPay(person).overtime.toFixed(1)).toLocaleString("tr-TR")} saat{person.hourly_wage ? ` · ${money(weekPay(person).overtime * person.hourly_wage * 1.5)}` : ""}</small>}<small className="leave-balance" data-testid={`leave-balance-${person.id}`}>Yıllık izin: {leaveBalance(person).remaining} / {leaveBalance(person).total} gün kaldı</small><span className="link-actions"><button className="wa-mini link" data-testid={`leave-link-copy-${person.id}`} onClick={() => shareLink(person, false)}><Link2 size={11} /> İzin linki</button>{person.phone && <button className="wa-mini" data-testid={`leave-link-whatsapp-${person.id}`} onClick={() => shareLink(person, true)}><MessageCircle size={11} /> Linki gönder</button>}</span><a className={`wa-mini ${person.phone ? "" : "disabled"}`} data-testid={`shift-whatsapp-${person.id}`} href={person.phone ? waLink(person.phone, planText(person)) : undefined} target="_blank" rel="noreferrer" title={person.phone ? "Haftalık planı WhatsApp'ta gönder" : "Telefon numarası girilmemiş"}><MessageCircle size={12} /> {person.phone ? "Planı gönder" : "Telefon yok"}</a></div>,
                 ...days.map((d) => {
                   const date = format(d, "yyyy-MM-dd");
                   const cell = byCell[`${person.id}|${date}`] || [];
                   const leave = leaveByCell[`${person.id}|${date}`];
+                  const pendingReq = !leave && pendingByCell[`${person.id}|${date}`];
                   return (
                     <div key={`${person.id}-${date}`} className={`shift-cell ${date === today ? "today" : ""} ${leave ? "on-leave" : ""}`} data-testid={`shift-cell-${person.id}-${date}`}>
+                      {pendingReq && <div className="leave-chip pending" data-testid={`leave-pending-${person.id}-${date}`} title="Onay bekleyen izin talebi"><CalendarOff size={11} /> Talep: {pendingReq.type}</div>}
                       {leave && <div className="leave-chip" data-testid={`leave-chip-${leave.id}`} onClick={() => onEdit("leaves", leave)}><CalendarOff size={11} /> {leave.type}<button className="chip-x" title="İzni sil" data-testid={`leave-delete-${leave.id}`} onClick={(e) => { e.stopPropagation(); if (window.confirm(`${leave.type} silinsin mi?`)) onDelete("leaves", leave.id); }}><X size={11} /></button></div>}
                       {cell.map((s) => (
                         <div key={s.id} className="shift-chip" data-testid={`shift-chip-${s.id}`} onClick={() => onEdit("shifts", s)}>
