@@ -131,3 +131,11 @@
 - Audit log (audit_logs) for all CRUD + key actions; panel on Kullanıcılar page.
 - PWA: manifest, icons, service worker, iOS meta.
 - Tested iteration_15.json; fixed sale quantity validation, staff toasts, audit user filter.
+
+## Iteration 16 (Haziran 2026)
+- Payment types (Nakit/Kart/Yemek kartı) on sales; report breakdown; reconciliation uses cash only.
+- Cash closing reminder cron 23:30 (cash-reminder).
+- Waste log (waste collection) with stock deduction + cost in reports.
+- Staff "Bugün sattıklarım" (sales.created_by).
+- Public QR menu (/menu, /api/public/menu) + QR card on Menü page.
+- Tested iteration_16.json; fixed dashboard waste key, atomic waste PUT, required select defaults.

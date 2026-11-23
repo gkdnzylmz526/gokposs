@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 16: tested payment types, payment breakdown in reports and the cash reconciliation, waste CRUD and stock math, staff my_today, public QR menu and cash-reminder cron auth. 10 of 11 backend tests pass. Found a CRITICAL crash and fixed it: the Stok Sayımı tab hit a runtime error because /api/dashboard did not return a `waste` key, so WasteLog called items.length on undefined. I added `waste` to the dashboard response. After the fix, all admin, staff (390px) and public /menu UI flows pass. Two open defects remain: (1) a failed waste PUT leaves the stock wrong; (2) the waste modal's Malzeme select shows the first item but does not send it, so saving without touching the select fails with 422.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/dashboard", "issue": "FIXED BY TESTER: the response had no `waste` list. The frontend setData(result) replaced the default empty waste:[], so the Stok Sayımı page crashed with 'Cannot read properties of undefined (reading length)' in <WasteLog>.", "priority": "CRITICAL"},
+      {"endpoint": "PUT /api/waste/{id}", "issue": "Not atomic. update_item first runs apply_waste(old,-1), which returns the stock, then apply_waste(doc,+1). If the new inventory_name matches no item, that second call raises 422 after the stock was already returned. The record is unchanged but stock is +qty too high (reproduced: 8.3 -> 9.3). Deleting the record later adds the qty back a second time. Fix: resolve and validate the new inventory before reversing the old one, or roll back on error.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "DELETE /api/waste/{id}", "issue": "find_one_and_delete runs before apply_waste. If the linked inventory item was deleted or renamed, apply_waste raises 422, but the waste record is already gone. The client sees an error even though the delete happened. Better: tolerate a missing inventory on reversal (skip the stock move) and return 200."},
+      {"endpoint": "GET /api/public/menu", "issue": "Items are keyed only by name. Duplicate product names inside one category would cause React key collisions in MenuPage (key={it.name}). Low risk."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EntryModal (waste) Malzeme select", "issue": "The required select has no 'Seçin' option and the form state starts empty. The browser shows the first item (e.g. TEST_UI_Et), but if the user does not touch the select, the payload is {quantity:0.5} without inventory_name. The backend returns 422 and the user sees the generic toast 'Kayıt kaydedilemedi'. Fix: set required selects to their first option when the modal opens, or add a placeholder option and validate on the client. The same pattern affects other required selects (payment and reason fall back to defaults, so they are harmless today).", "selector": "[data-testid='inventory_name-select']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Menü Ürünleri QR card", "issues": ["'Linki kopyala' showed the 'Kopyalanamadı' toast in headless Chromium because the clipboard permission is denied there. This is probably fine in real browsers, but consider an execCommand('copy') or select-text fallback."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration16_payment_waste_menu.py", "/app/test_reports/pytest/pytest_it16.xml"],
+  "action_items": [
+    "Keep or confirm the tester fix: /api/dashboard now returns `waste` (server.py dashboard()). Also consider defaulting missing keys on the frontend (setData({...empty, ...result})).",
+    "Make PUT /api/waste/{id} atomic: validate the new inventory before reversing the old stock move.",
+    "Waste modal: pre-select the first inventory option, or add a placeholder with client-side validation, so the default selection is actually sent.",
+    "Optional: on waste delete, tolerate a missing inventory instead of returning 422 after the record is deleted."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1040 lines; split it into modules (waste, reports, cron, staff).",
+    "update_item and delete_item in make_crud do side effects first and validate after (waste, sales). Any failure partway leaves stock out of sync. Validate first, then mutate.",
+    "Frontend setData(result) on the dashboard replaces the `empty` defaults. Any key the API leaves out crashes pages. Merge with the defaults.",
+    "The cron schedule (23:30 Istanbul) for /api/cron/cash-reminder could not be verified from the code; only the auth check (401) was tested."
+  ],
+  "updated_files": ["/app/backend/server.py (dashboard: added waste list to response)", "/app/backend/tests/test_iteration16_payment_waste_menu.py"],
+  "success_rate": {"backend": "91% (10/11)", "frontend": "90% (all requested flows pass after the dashboard fix; waste-modal default-select bug open)"},
+  "seed_data_creation": "None kept. Temporary TEST_UI_Et/TEST_UI_Kebap (ui_setup_it15.py) plus TEST_it16_*/TEST_İçli_* were created and deleted, along with their sales, waste, stock_movements and audit_logs. The existing TEST_Domates inventory and its waste record, and the product 'x', were not created by me and were left as they were. The real owner's 'adana' was not touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run tests/test_iteration16_payment_waste_menu.py with -n 0. test_update_invalid_name_no_stock_drift is expected to fail until the waste PUT is made atomic. The member account has role staff. For UI, run tests/ui_setup_it15.py (it prints ids and tickets), then 'cleanup <prod> <inv>'. Generate fresh sign-in tickets with /tmp/tk.py-style code (bapi /sign_in_tokens). Today's Kart totals include another party's product 'x' (100 TL), so assert deltas, not absolutes. Do not call the cron with the valid secret (Gmail is live).",
+  "rca of the issue": "Stok Sayımı crash: WasteLog receives data.waste. Dashboard.load() does setData(result) with the /api/dashboard payload, which had no 'waste' key, so items is undefined and items.length throws. This unmounts the whole dashboard. Mitigation: return waste from /api/dashboard (done) and merge with the defaults on the frontend. Waste PUT drift: reproduce by POST /api/waste qty 1, then PUT with inventory_name='nonexistent'. You get 422, but the stock rises by 1 because the reversal already ran."
+}

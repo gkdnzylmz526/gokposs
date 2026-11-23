@@ -266,6 +266,7 @@ async def dashboard():
     cash = await list_items("cash")
     products = await list_items("products", limit=None)
     suppliers = await list_items("suppliers", limit=None)
+    waste = await list_items("waste")
     leaves = await db.leaves.find({}, {"_id": 0}).sort("date", 1).to_list(None)
     leave_requests = await db.leave_requests.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     advances = await db.advances.find({}, {"_id": 0}).sort("date", -1).to_list(None)
@@ -280,7 +281,7 @@ async def dashboard():
         weekly.append({"date": day, "revenue": _total(i for i in week_sales if local_day(i["created_at"]) == day), "expenses": _total(i for i in week_expenses if local_day(i["created_at"]) == day)})
     revenue, spent = weekly[-1]["revenue"], weekly[-1]["expenses"]
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
-    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests}
+    return {"revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests, "waste": waste}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
 
@@ -982,6 +983,9 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "sales":
             doc["created_by"] = old.get("created_by", "")
         if name == "waste":
+            key = _tr_key(doc["inventory_name"])
+            if not any(_tr_key(i["name"]) == key for i in await list_items("inventory", limit=None)):
+                raise HTTPException(status_code=422, detail="Stokta bu isimde malzeme yok")
             await apply_waste(old, -1, "Fire düzeltildi (eski kayıt geri alındı)")
             doc["inventory_id"] = ""
             await apply_waste(doc, 1, f"Fire düzeltildi · {doc['reason']}")
