@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { useUser } from "@clerk/react";
+import { AuditLog } from "@/components/AuditLog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const roleLabel = { admin: "Yönetici", member: "Erişimi yok" };
+const roleLabel = { admin: "Yönetici (her şey)", staff: "Personel (satış + stok sayımı)", member: "Erişimi yok" };
 
 export const UsersView = () => {
   const { user } = useUser();
@@ -17,7 +18,7 @@ export const UsersView = () => {
   };
   return (
     <>
-      <div className="welcome-row"><div><p className="eyebrow">AYARLAR</p><h2>Kullanıcılar</h2><p className="muted">Panele yalnızca "Yönetici" yetkisi olanlar girebilir. Yeni biri kayıt olduğunda "Erişimi yok" olarak başlar; buradan yönetici yapabilirsiniz.</p></div></div>
+      <div className="welcome-row"><div><p className="eyebrow">AYARLAR</p><h2>Kullanıcılar</h2><p className="muted">Panele yalnızca "Yönetici" yetkisi olanlar girebilir. "Personel" yetkisi yalnızca satış girişi ve stok sayımı yapabilir, finansal verileri göremez. Yeni kayıt olanlar "Erişimi yok" olarak başlar.</p></div></div>
       <section className="panel table-panel" data-testid="users-panel">
         <div className="table-head" style={{ gridTemplateColumns: "2fr 1fr 1fr" }}><span>E-posta</span><span>Kayıt</span><span>Yetki</span></div>
         {data.users.map((u, i) => (
@@ -28,6 +29,7 @@ export const UsersView = () => {
           </div>
         ))}
       </section>
+      <AuditLog />
     </>
   );
 };

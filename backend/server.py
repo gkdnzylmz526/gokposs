@@ -37,7 +37,7 @@ import requests as http_requests
 from pymongo import ReturnDocument as _RD
 
 # The role list is code, so every publish ships it to Live. Highest first; keep `admin`.
-ROLES = ["admin", "member"]
+ROLES = ["admin", "staff", "member"]
 DEFAULT_ROLE = "member"
 RETIRED_ROLES: Dict[str, str] = {}
 RANK = {r: len(ROLES) - i for i, r in enumerate(ROLES)}
@@ -74,6 +74,31 @@ async def current_member(request: Request) -> Dict[str, Any]:
         await db.users.update_one({"user_id": uid}, {"$set": {"env": ENV}})
     return {**member, "env": ENV, "role": effective_role(member["role"])}
 
+STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count")]
+
+def staff_allowed(method: str, path: str) -> bool:
+    return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
+
+def _label(collection: str, doc: Dict[str, Any] | None) -> str:
+    doc = doc or {}
+    if collection == "sales":
+        return f"{doc.get('product_name') or 'Satış'} × {doc.get('quantity', 1):g} · {doc.get('amount', 0):g} ₺"
+    if collection in ("expenses", "advances"):
+        return f"{doc.get('category') or doc.get('note') or 'Kayıt'} · {doc.get('amount', 0):g} ₺"
+    if collection == "cash":
+        return f"Açılış {doc.get('opening', 0):g} ₺ · kapanış {doc.get('closing', 0):g} ₺"
+    if collection in ("shifts", "leaves"):
+        return f"{doc.get('date', '')} {doc.get('start', '')}{'–' + doc['end'] if doc.get('end') else ''} {doc.get('type', '')}".strip()
+    if collection == "orders":
+        return f"{doc.get('supplier', '')} · {doc.get('status', '')}"
+    return str(doc.get("name") or doc.get("supplier") or doc.get("id", ""))
+
+async def audit(request: Request, action: str, collection: str, item_id: str, doc: Dict[str, Any] | None = None, detail: str = "") -> None:
+    member = getattr(request.state, "member", None) or {}
+    await db.audit_logs.insert_one({"id": str(uuid.uuid4()), "user_id": member.get("user_id", ""), "user_email": member.get("email", ""), "role": member.get("role", ""),
+                                    "action": action, "collection": collection, "item_id": item_id, "summary": detail or _label(collection, doc),
+                                    "created_at": datetime.now(timezone.utc).isoformat()})
+
 async def dashboard_guard(request: Request) -> None:
     """Every /api route except the staff leave link and cron webhooks is admin-only."""
     if request.url.path.startswith(PUBLIC_PREFIXES):
@@ -81,6 +106,9 @@ async def dashboard_guard(request: Request) -> None:
     if request.url.path in ("/api/me",):
         return
     member = await current_member(request)
+    request.state.member = member
+    if member["role"] == "staff" and staff_allowed(request.method, request.url.path):
+        return
     if member["role"] != "admin":
         raise HTTPException(status_code=403, detail="Bu panele erişim yetkiniz yok")
 
@@ -399,6 +427,32 @@ async def set_role(user_id: str, body: RoleIn):
     await db.users.update_one({"user_id": user_id}, {"$set": {"role": body.role}})
     return {"user_id": user_id, "role": body.role}
 
+class CountIn(BaseModel):
+    quantity: float = Field(ge=0)
+
+@api.get("/staff-view")
+async def staff_view():
+    products = [{k: p.get(k) for k in ("id", "name", "category", "price", "active")} for p in await list_items("products", limit=None)]
+    inventory = [{k: i.get(k) for k in ("id", "name", "quantity", "unit", "minimum")} for i in await list_items("inventory", limit=None)]
+    return {"products": products, "inventory": inventory}
+
+@api.post("/inventory/{item_id}/count")
+async def count_inventory(item_id: str, body: CountIn, request: Request):
+    old = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    if not old:
+        raise HTTPException(status_code=404, detail="Malzeme bulunamadı")
+    new = round(body.quantity, 3)
+    await db.inventory.update_one({"id": item_id}, {"$set": {"quantity": new}})
+    if new != float(old.get("quantity", 0)):
+        await log_movement({**old, "quantity": new}, new - float(old.get("quantity", 0)), "Stok sayımı")
+    await audit(request, "Saydı", "inventory", item_id, detail=f"{old['name']}: {float(old.get('quantity', 0)):g} → {new:g} {old.get('unit', '')}")
+    return {"id": item_id, "quantity": new}
+
+@api.get("/audit-logs")
+async def audit_logs(collection: str | None = None, user_email: str | None = None, limit: int = Query(200, ge=1, le=1000)):
+    query = {k: v for k, v in (("collection", collection), ("user_email", user_email)) if v}
+    return await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
 @api.post("/cron/monthly-summary")
 async def cron_monthly_summary(request: Request, background: BackgroundTasks):
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
@@ -559,7 +613,7 @@ def suggested_price(product: Dict[str, Any]) -> float | None:
     return math.ceil(cost / (1 - margin / 100)) if cost > 0 and margin < 100 else None
 
 @api.post("/products/apply-suggested")
-async def apply_suggested_prices(payload: Dict[str, List[str]]):
+async def apply_suggested_prices(payload: Dict[str, List[str]], request: Request):
     ids = set(payload.get("product_ids", []))
     changed = []
     for product in await list_items("products", limit=None):
@@ -567,6 +621,8 @@ async def apply_suggested_prices(payload: Dict[str, List[str]]):
         if product["id"] in ids and price and price != float(product.get("price", 0)):
             await db.products.update_one({"id": product["id"]}, {"$set": {"price": price}})
             changed.append({"id": product["id"], "name": product["name"], "old_price": product.get("price", 0), "new_price": price})
+    if changed:
+        await audit(request, "Toplu fiyat", "products", "", detail=", ".join(f"{c['name']} {c['old_price']:g}→{c['new_price']:g} ₺" for c in changed)[:500])
     return {"updated": changed}
 
 def _expense_supplier(doc: Dict[str, Any], inventory: Dict[str, Dict[str, Any]]) -> str:
@@ -602,7 +658,7 @@ class CopyWeekRequest(BaseModel):
     to_start: date_cls
 
 @api.post("/shifts/copy-week")
-async def copy_week(req: CopyWeekRequest):
+async def copy_week(req: CopyWeekRequest, request: Request):
     source_days = [(req.from_start + timedelta(days=i)).isoformat() for i in range(7)]
     offset = req.to_start - req.from_start
     source = await db.shifts.find({"date": {"$in": source_days}}, {"_id": 0}).to_list(None)
@@ -618,6 +674,8 @@ async def copy_week(req: CopyWeekRequest):
         await db.shifts.insert_one({**doc})
         existing.add((shift["staff_id"], new_date, shift["start"]))
         created += 1
+    if created:
+        await audit(request, "Kopyaladı", "shifts", "", detail=f"{req.from_start} haftasından {req.to_start} haftasına {created} vardiya")
     return {"created": created, "source_count": len(source)}
 
 async def price_data(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -785,7 +843,7 @@ async def staff_request_link(staff_id: str, regenerate: bool = False):
     return {"token": token}
 
 @api.post("/leave-requests/{request_id}/{decision}")
-async def decide_leave_request(request_id: str, decision: str):
+async def decide_leave_request(request_id: str, decision: str, request: Request):
     if decision not in ("approve", "reject"):
         raise HTTPException(status_code=404, detail="Geçersiz işlem")
     req = await db.leave_requests.find_one({"id": request_id, "status": "Bekliyor"}, {"_id": 0})
@@ -801,6 +859,7 @@ async def decide_leave_request(request_id: str, decision: str):
             day += timedelta(days=1)
     status = "Onaylandı" if decision == "approve" else "Reddedildi"
     await db.leave_requests.update_one({"id": request_id}, {"$set": {"status": status, "decided_at": datetime.now(timezone.utc).isoformat()}})
+    await audit(request, "Onayladı" if decision == "approve" else "Reddetti", "leave_requests", request_id, detail=f"İzin talebi {req['start']}–{req['end']} ({req['type']})")
     return {"status": status, "created": created}
 
 @api.get("/payroll/{staff_id}/slip")
@@ -817,10 +876,15 @@ def make_crud(name: str, model: type[BaseModel]):
     async def get_items():
         return await list_items(name)
     @api.post(f"/{name}", response_model=model)
-    async def create_item(item: model):
+    async def create_item(item: model, request: Request):
         doc = item.model_dump()
         if name == "products":
             doc = await with_recipe_cost(doc)
+        if name == "sales" and getattr(request.state, "member", {}).get("role") == "staff":
+            product = await db.products.find_one({"id": doc.get("product_id")}, {"_id": 0})
+            if not product:
+                raise HTTPException(status_code=422, detail="Menü ürünü seçin")
+            doc.update(product_name=product["name"], unit_price=float(product["price"]), unit_cost=float(product.get("cost", 0)), amount=round(float(doc["quantity"]) * float(product["price"]), 2))
         if name == "sales":
             await fill_sale_cost(doc)
             doc["stock_moves"] = await stock_moves(doc)
@@ -833,9 +897,10 @@ def make_crud(name: str, model: type[BaseModel]):
             await log_movement(doc, doc["quantity"], "İlk kayıt")
         if name == "inventory":
             await recompute_product_costs()
+        await audit(request, "Ekledi", name, doc["id"], doc)
         return model(**doc)
     @api.put(f"/{name}/{{item_id}}", response_model=model)
-    async def update_item(item_id: str, item: model):
+    async def update_item(item_id: str, item: model, request: Request):
         old = await db[name].find_one({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
@@ -863,9 +928,10 @@ def make_crud(name: str, model: type[BaseModel]):
             await log_movement(doc, float(doc["quantity"]) - float(old.get("quantity", 0)), "Manuel sayım / düzeltme")
         if name == "inventory":
             await recompute_product_costs()
+        await audit(request, "Düzenledi", name, item_id, doc)
         return model(**doc)
     @api.delete(f"/{name}/{{item_id}}")
-    async def delete_item(item_id: str):
+    async def delete_item(item_id: str, request: Request):
         old = await db[name].find_one_and_delete({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
@@ -881,6 +947,7 @@ def make_crud(name: str, model: type[BaseModel]):
         if name == "inventory":
             await log_movement({**old, "quantity": 0}, -float(old.get("quantity", 0)), "Malzeme silindi")
             await recompute_product_costs()
+        await audit(request, "Sildi", name, item_id, old)
         return {"ok": True}
     return get_items, create_item, update_item, delete_item
 
