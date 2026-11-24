@@ -72,7 +72,7 @@ export const ProductWizard = ({ inventory, categories, onClose, onSaved }) => {
       <button className="primary-button" disabled={!product.name.trim()} data-testid="wizard-next" onClick={() => go("category")}>Devam</button>
     </Question>,
     category: <Question title={`${product.name} hangi kategoride?`}>
-      <div className="wiz-chips">{[...new Set([...categories, "Pide", "Dürüm", "Kebap", "İçecek", "Tatlı"])].map((c) => <button key={c} className={product.category === c ? "active" : ""} data-testid={`wizard-category-${c}`} onClick={() => setProduct({ ...product, category: c })}>{c}</button>)}</div>
+      <div className="wiz-chips">{[...categories, "Pide", "Dürüm", "Kebap", "İçecek", "Tatlı"].filter((c, i, all) => all.findIndex((x) => key(x) === key(c)) === i).map((c) => <button key={c} className={product.category === c ? "active" : ""} data-testid={`wizard-category-${c}`} onClick={() => setProduct({ ...product, category: c })}>{c}</button>)}</div>
       <input value={product.category} data-testid="wizard-category-input" placeholder="veya yeni kategori yazın" onChange={(e) => setProduct({ ...product, category: e.target.value })} />
       <button className="primary-button" disabled={!product.category.trim()} data-testid="wizard-next" onClick={() => go("ingredient")}>Devam</button>
     </Question>,

@@ -1,0 +1,39 @@
+{
+  "summary": "Product wizard (Sorularla ürün ekle) tested on backend and frontend. Backend POST /api/products/wizard: 5/5 pytest pass. Covered: new ingredients opened in all 3 restaurants (qty 0, given price); cost = 50 TL for the Pide example; recipe points to the home restaurant's inventory; duplicate name returns 409 with Turkish case folding (TEST_P20_PİDE vs TEST_P20_Pide); an existing ingredient matched case-insensitively (KIYMA matched Kıyma) is reused; restaurants missing it get a copy; a zero-cost item gets the provided price; X-Restaurant: all works; 422 validations; 401 without auth. Frontend (1920px), whole flow passed: banner on Menü Ürünleri and Ürün Maliyeti; Enter advances; category chips and input; 'Yeni malzeme' and 'Stokta var · ortalama ₺X' status; unit chips and unit-cost input; gr/kg toggle (80 gr = ₺40, kg = ₺40.000); line preview; recap lines and total ₺50; more-yes loop; more-no; margin chips (65 gives ₺143, 70 gives ₺167, custom 80 gives ₺251); price prefilled 143 with margin %65,0; summary; save toast '6 yeni stok kalemi açıldı'; product shown in Menü Ürünleri and Ürün Maliyeti with ₺50 in each restaurant column. Stok Sayımı in Dürümtır (screenshot) and FL/ET/DU via API all show TEST_Hamur 0 adet ₺10 and TEST_Kıyma 0 kg ₺500. A known ingredient with a price skips the price step; wizard-back works; adding the same ingredient twice shows the toast 'Bu malzeme zaten tarifte'; wizard-line-remove updates the total; a price below target shows danger-inline; the duplicate product's 409 toast appears and the wizard stays open; wizard-close works. Mobile 390px: recap stacks below the question; usable.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/products/wizard", "issue": "When an existing ingredient is copied into restaurants that lack it, the copy uses the casing the user typed (ing.name), not the existing item's name. Example: ET has 'TEST_P20_Şeker'; FL and DU got 'test_p20_şeker'. Same-named stock then differs between restaurants. Fix: use next(iter(same.values()))['name'] when same is non-empty (unit is already taken from it)."},
+      {"endpoint": "POST /api/products/wizard", "issue": "If an existing item's unit differs from ing.unit (e.g. API caller sends unit 'gr' for a 'kg' item), the amount is not converted and ing.unit is silently ignored. The frontend always sends the known unit, so the UI is not affected. Only matters for direct API use."},
+      {"endpoint": "_tr_key (design note)", "issue": "Turkish folding treats ASCII 'I' as 'ı', so 'Iskender' and 'iskender' are different keys, and 'TEST_It20' differs from 'test_it20'. This is correct Turkish behaviour, but users with non-Turkish keyboards may create duplicates. Frontend key (toLocaleLowerCase tr-TR) behaves the same way, so they are consistent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Dashboard pickRestaurant (App.js line 61)", "issue": "Picking the restaurant that is already active (e.g. clicking the current restaurant's card in RestaurantSummary on Genel Bakış, or a programmatic select change) sets loading=true. rid does not change, so load() never re-runs and the panel stays on 'Panel hazırlanıyor…' until reload. Reproduced with select_option to the current value. Fix: `if (id === rid) return;` or call load() directly.", "selector": "[data-testid=loading-state]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Product wizard mobile 390px", "issues": [".wizard-modal width min(860px,96vw) = 374px plus backdrop padding 20px puts the right edge at 394px, 4px past the viewport (right border cut off). Use width:min(860px,100%)."]},
+      {"screen": "Product wizard category step", "issues": ["Duplicate category chips 'kebap' (existing category) and 'Kebap' (default list). Dedupe case-insensitively with tr-TR."]},
+      {"screen": "Menü Ürünleri", "issues": ["Many leftover price-alert cards from earlier test runs (TEST_Dom_*, TEST_Sog_*) clutter the page. They are not from this iteration."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration20_product_wizard.py", "/app/test_reports/pytest/pytest_it20.xml"],
+  "action_items": [
+    "App.js pickRestaurant: guard against selecting the same restaurant (otherwise stuck loading)",
+    "products/wizard: copies in other restaurants should use the existing item's name, not the user-typed casing",
+    "CSS .wizard-modal: width min(860px,100%) to avoid 4px overflow at 390px",
+    "Wizard category chips: dedupe case-insensitively"
+  ],
+  "critical_code_review_comments": [
+    "ProductWizard known-ingredient map averages unit_cost across restaurants (all_inventory). The backend instead takes the first non-zero price when unit_cost is omitted. The frontend shows an average, but the backend recipe cost uses the home restaurant's own price, so for known items the wizard preview can differ from the saved cost when restaurant prices differ.",
+    "Backend wizard inserts inventory items one by one without a transaction. A failure midway leaves orphaned stock items. Acceptable for MVP."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration20_product_wizard.py"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "seed_data_creation": "None persistent. Created and deleted by id: TEST_P20_* products and inventory (backend tests), TEST_Pide product and TEST_Hamur/TEST_Kıyma in all 3 restaurants (UI). Also removed by id leftovers from my own early runs (3x 'test_it20_şeker', 2x 'test_p20_şeker'); the cleanup regex is now case-insensitive. Only 'adana' product remains.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run backend test with -n 0. A Clerk ticket is single-use per browser session: generate a new one for every browser_automation call (tests/clerk_ticket.py). Don't select_option the restaurant that is already active (it triggers the stuck-loading bug). Stok Sayımı rows are not <tr>; read section text. Avoid ASCII I/i in test names when checking case-insensitive matching (Turkish folding)."
+}

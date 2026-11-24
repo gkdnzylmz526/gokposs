@@ -821,7 +821,7 @@ async def product_wizard(body: WizardIn, request: Request):
         for rid in RESTAURANT_IDS:
             item = same.get(rid)
             if not item:
-                item = {**InventoryEntry(name=ing.name.strip(), unit=(next(iter(same.values()))["unit"] if same else ing.unit), unit_cost=price).model_dump(), "restaurant_id": rid}
+                item = {**InventoryEntry(name=(next(iter(same.values()))["name"] if same else ing.name.strip()), unit=(next(iter(same.values()))["unit"] if same else ing.unit), unit_cost=price).model_dump(), "restaurant_id": rid}
                 await db.raw.inventory.insert_one({**item})
                 same[rid] = item
                 created.append(f"{item['name']} ({RESTAURANT_NAMES[rid]})")

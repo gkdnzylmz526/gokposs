@@ -160,3 +160,8 @@
 - Split bill: POST /api/tables/{id}/pay (full / amount with equal split / items); pending payments, proportional sales on finalize ('bölünmüş hesap' note); pending remove; cancel blocked after payments.
 - Stock transfers: /api/stock-transfers POST/GET/DELETE(undo), same-name match or create in target; movements both sides.
 - Tested: backend 15/15 + regression; frontend iteration_19 ~95% -> pending-remove bug fixed. Redeploy requested.
+
+## Iteration 20 (Haziran 2026)
+- Product wizard ("Sorularla ürün ekle", ProductWizard.jsx) on Menü Ürünleri & Ürün Maliyeti: name → category → ingredient loop (known from stock or new: unit + price) → amount (gr/kg, ml/lt toggle) → target margin → sale price → summary; live recap cost.
+- POST /api/products/wizard: new ingredients created in all 3 restaurants (qty 0, same price), zero-price items filled, duplicate name 409.
+- Fixes: picking current restaurant no longer stuck loading; wizard mobile width; category dedupe; copied ingredient keeps original name. Tested iteration_20 (backend 100%, frontend 95% → fixed). Redeploy requested.
