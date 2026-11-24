@@ -259,6 +259,8 @@ class ProductEntry(Entry):
     recipe: List[RecipeItem] = []
     cost_from_recipe: bool = False
     target_margin: float = 0
+    description: str = Field(default="", max_length=200)
+    photo: Dict[str, Any] = {}
 
 class IncomeEntry(Entry):
     date: str = Field(pattern=DATE_PATTERN)
@@ -572,7 +574,9 @@ async def public_menu():
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for p in sorted(await list_items("products", limit=None), key=lambda x: x["name"]):
         if p.get("active", True):
-            groups.setdefault(p.get("category") or "Menü", []).append({"name": p["name"], "price": p.get("price", 0)})
+            photo = (p.get("photo") or {}).get("id")
+            groups.setdefault(p.get("category") or "Menü", []).append({"name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""),
+                                                                   "photo_url": f"/api/public/photos/{photo}" if photo else ""})
     return {"name": "GÖKBOSS", "categories": [{"category": k, "items": v} for k, v in sorted(groups.items())]}
 
 async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
@@ -821,7 +825,7 @@ async def dismiss_price_alert(alert_id: str):
 def suggested_price(product: Dict[str, Any]) -> float | None:
     margin = float(product.get("target_margin") or 0) or 65
     cost = float(product.get("cost", 0))
-    return math.ceil(cost / (1 - margin / 100)) if cost > 0 and margin < 100 else None
+    return math.ceil(round(cost / (1 - margin / 100), 6)) if cost > 0 and margin < 100 else None
 
 class WizardIngredient(BaseModel):
     name: str = Field(min_length=1, max_length=80)
@@ -1578,7 +1582,7 @@ def with_overhead(row: Dict[str, Any], ratio_pct: float) -> Dict[str, Any]:
     full = round(cost + share, 2)
     room = 1 - row["target_margin"] / 100 - r
     return {**row, "overhead_cost": share, "full_cost": full, "net_profit": round(price - full, 2), "net_margin": _margin(price, full) if price else None,
-            "suggested_with_overhead": math.ceil(cost / room) if cost > 0 and room > 0.01 else None}
+            "suggested_with_overhead": math.ceil(round(cost / room, 6)) if cost > 0 and room > 0.01 else None}
 
 @api.get("/product-costs")
 async def product_costs():
@@ -1616,8 +1620,9 @@ async def product_costs():
     overhead = await overhead_info()
     rows = [with_overhead(r, overhead["ratio_pct"]) for r in rows]
     with_recipe = [r for r in rows if r["has_recipe"] and r["price"]]
+    costed = [r for r in rows if r["cost"] > 0 and r["price"]]
     summary = {"products": len(rows), "with_recipe": len(with_recipe), "avg_food_cost_pct": round(sum(r["food_cost_pct"] for r in with_recipe) / len(with_recipe), 1) if with_recipe else None,
-               "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"]), "losing": sum(1 for r in with_recipe if r["net_profit"] < 0)}
+               "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"]), "losing": sum(1 for r in costed if r["net_profit"] < 0)}
     return {"restaurants": RESTAURANTS, "summary": summary, "overhead": overhead, "products": rows}
 
 def created_for(day: str, fallback: str) -> str:
@@ -1709,10 +1714,56 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
     await audit(request, "Dosya ekledi", "invoices", invoice_id, detail=f"{inv['supplier']} · {file.filename}")
     return meta
 
+PHOTO_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+@api.post("/products/{product_id}/photo")
+async def upload_product_photo(product_id: str, request: Request, file: UploadFile = File(...)):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else ""
+    if ext not in PHOTO_TYPES:
+        raise HTTPException(status_code=422, detail="Yalnızca JPG, PNG veya WEBP fotoğraf yüklenebilir")
+    data = await file.read()
+    if not data or len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Fotoğraf boş veya 5 MB'den büyük")
+    path = f"{APP_PREFIX}/products/{product_id}/{uuid.uuid4()}.{ext}"
+    try:
+        result = await asyncio.to_thread(put_object, path, data, PHOTO_TYPES[ext])
+    except Exception as exc:
+        logging.exception("product photo upload failed")
+        raise HTTPException(status_code=502, detail="Fotoğraf yüklenemedi, lütfen tekrar deneyin") from exc
+    meta = {"id": str(uuid.uuid4()), "filename": file.filename, "content_type": PHOTO_TYPES[ext], "size": len(data), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.files.insert_one({**meta, "kind": "product_photo", "product_id": product_id, "storage_path": result.get("path", path), "is_deleted": False})
+    if product.get("photo"):
+        await db.files.update_one({"id": product["photo"]["id"]}, {"$set": {"is_deleted": True}})
+    await db.products.update_one({"id": product_id}, {"$set": {"photo": meta}})
+    await audit(request, "Fotoğraf ekledi", "products", product_id, detail=product["name"])
+    return meta
+
+@api.delete("/products/{product_id}/photo")
+async def delete_product_photo(product_id: str, request: Request):
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    if product.get("photo"):
+        await db.files.update_one({"id": product["photo"]["id"]}, {"$set": {"is_deleted": True}})
+    await db.products.update_one({"id": product_id}, {"$set": {"photo": {}}})
+    await audit(request, "Fotoğraf sildi", "products", product_id, detail=product["name"])
+    return {"ok": True}
+
+@api.get("/public/photos/{file_id}")
+async def public_photo(file_id: str):
+    record = await db.files.find_one({"id": file_id, "kind": "product_photo", "is_deleted": False}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı")
+    data, _ = await asyncio.to_thread(get_object, record["storage_path"])
+    return Response(content=data, media_type=record["content_type"], headers={"Cache-Control": "public, max-age=86400"})
+
 @api.get("/files/{file_id}")
 async def download_file(file_id: str):
     record = await db.files.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
-    if not record or not await db.invoices.find_one({"id": record["invoice_id"]}):
+    if not record or not record.get("invoice_id") or not await db.invoices.find_one({"id": record["invoice_id"]}):
         raise HTTPException(status_code=404, detail="Dosya bulunamadı")
     data, _ = await asyncio.to_thread(get_object, record["storage_path"])
     return Response(content=data, media_type=record["content_type"], headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(record['filename'])}"})
@@ -1778,6 +1829,8 @@ def make_crud(name: str, model: type[BaseModel]):
                 await db.expenses.update_one({"id": old["expense_id"]}, {"$set": {"amount": doc["amount"], "supplier": doc["supplier"], "note": invoice_note(doc)}})
         if name == "expenses":
             doc["invoice_id"] = old.get("invoice_id", "")
+        if name == "products":
+            doc["photo"] = old.get("photo", {})
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "expenses" and (old.get("purchases") or doc.get("purchases")):

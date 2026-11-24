@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 22: fixed-cost (overhead) allocation by revenue ratio. Backend: 8/8 pytest pass after one fix (GET defaults, auto revenue = last 30d sales+incomes all restaurants matches DB, PUT with X-Restaurant all, ratio 30%, negative -> 422, blank names dropped, manual->auto fallback, member 403, product-costs adana: overhead 159 / full 259 / net profit 271 / net margin 51.1 / suggested_with_overhead 2000, None when target+ratio >= 100%). Frontend: overhead panel opens by default when total 0 and stays closed when total > 0, defaults listed, live total/ratio preview, add/remove rows, save -> toast + header %30 + table updates (cost-overhead 159 tam 259, cost-margin 51,1 malzeme 81,1, cost-suggested 2.000), 'Sabit giderle zarar eden' tile, calculator (calc-suggested 2.000 with 30% overhead, calc-real-margin 60,0), print-all window contains 'Sabit gider payı' and 'Tam maliyet'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/product-costs", "issue": "FIXED by tester: floating-point bug. 1 - 0.65 - 0.30 = 0.04999..., so math.ceil(100/room) returned 2001 instead of 2000. Changed to math.ceil(round(cost / room, 6)). The same fix was made in the frontend CostCalculator (Math.ceil(Number((total/room).toFixed(6)))). suggested_price() (line ~824) has the same pattern and can hit the same edge case."},
+      {"endpoint": "/api/product-costs summary", "issue": "summary.losing and the 'En düşük net marj' tile only count products that have a recipe. Products with only a manual cost (like adana, cost 100) are left out, so the tiles show '0 / 1' and '—' even though adana has a net margin. The spec says losing = every product with net_profit < 0. Decide whether manual-cost products should be counted."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Cost table / print card", "issue": "When suggested_with_overhead is null (target margin + overhead ratio >= ~99%), the UI falls back to suggested_price, which leaves the overhead out. The suggested price shown looks normal but is misleading. It should show '—' or a 'not possible' note.", "selector": "[data-testid^=cost-suggested-]", "priority": "LOW"},
+      {"component": "CostCalculator", "issue": "When margin + ratio is too high (for example 75% + 30%), calc-suggested shows ₺0,00 with no explanation.", "selector": "[data-testid=calc-suggested]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Ürün Maliyeti overhead panel", "issues": ["The amount inputs (overhead-amount-i) sit inside a label with color: var(--muted), so typed values like 60000 show in light grey and look like placeholders. Add color: var(--ink) or #1e293b to .overhead-item input.", "In overhead-ratio-preview and calc-real-margin, the '%' sign is large and the number is small ('%30,0'), which looks unbalanced."]},
+      {"screen": "Cost table", "issue_note": "For manual-cost products without a recipe, the Malzeme maliyeti column shows only '+ Sorularla tarif ekle' and hides the manual cost (100). The 'tam ₺259' figure next to it is then hard to understand.", "issues": ["Show the manual cost next to the add-recipe link"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration22_overhead.py", "/app/test_reports/pytest/pytest_it22.xml"],
+  "action_items": [
+    "Review the float-precision fix in with_overhead and CostCalculator, and apply the same rounding to suggested_price()",
+    "Decide whether summary.losing and worst-margin should include manual-cost products",
+    "Show '—' instead of falling back to suggested_price when suggested_with_overhead is null, and explain the ₺0 in the calculator",
+    "Fix the low-contrast text in the overhead amount inputs"
+  ],
+  "critical_code_review_comments": [
+    "overhead_info sums auto revenue in Python over every sales/incomes doc from the last 30 days, on every /product-costs call. A Mongo $group aggregation would be cheaper as data grows.",
+    "OverheadPanel copies info into state only on mount, so a stale state is possible if another user edits the values. Acceptable for now."
+  ],
+  "updated_files": ["/app/backend/server.py (with_overhead ceil rounding)", "/app/frontend/src/components/ProductCosts.jsx (calculator ceil rounding)", "/app/backend/tests/test_iteration22_overhead.py"],
+  "success_rate": {"backend": "100% (after fix)", "frontend": "100% core flows"},
+  "seed_data_creation": "TEST_Kiyma inventory item (florya) was created for the calculator test and then deleted. The settings {id:'overhead'} doc was deleted at the end, as requested. Product adana is unchanged (530 / 100, no recipe).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run with: pytest tests/test_iteration22_overhead.py -n 0. The fixture deletes settings{id:'overhead'} before and after. UI sign-in: python3 tests/clerk_ticket.py <email> -> /sign-in?__clerk_ticket=. The adana product id is cc3c4123-8e75-48bd-9ab6-781aac6a16e6."
+}

@@ -12,7 +12,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const card = (p, restaurants) => `<section class="card"><header><div><small>${esc(p.category)}</small><h2>${esc(p.name)}</h2></div><div class="price">${money(p.price)}<small>satış fiyatı</small></div></header>
 <table><thead><tr><th>Malzeme</th><th>Miktar</th><th>Birim fiyat</th><th>Tutar</th></tr></thead><tbody>${p.lines.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.amount.toLocaleString("tr-TR")} ${esc(l.unit)}</td><td>${money(l.unit_price)}</td><td>${money(l.cost)}</td></tr>`).join("") || `<tr><td colspan="4">Tarif girilmemiş</td></tr>`}</tbody>
 <tfoot><tr><td colspan="3">Malzeme maliyeti (ortalama)</td><td>${money(p.cost)}</td></tr>${p.overhead_cost ? `<tr><td colspan="3">Sabit gider payı (kira, elektrik, maaş…)</td><td>${money(p.overhead_cost)}</td></tr><tr><td colspan="3">Tam maliyet</td><td>${money(p.full_cost)}</td></tr>` : ""}</tfoot></table>
-<div class="stats"><div><small>Net kâr</small><b>${money(p.net_profit)}</b></div><div><small>Net marj</small><b>${pct(p.net_margin)}</b></div><div><small>Gıda maliyeti</small><b>${pct(p.food_cost_pct)}</b></div><div><small>Önerilen fiyat (%${p.target_margin} net)</small><b>${p.suggested_with_overhead ? money(p.suggested_with_overhead) : p.suggested_price ? money(p.suggested_price) : "—"}</b></div></div>
+<div class="stats"><div><small>Net kâr</small><b>${money(p.net_profit)}</b></div><div><small>Net marj</small><b>${pct(p.net_margin)}</b></div><div><small>Gıda maliyeti</small><b>${pct(p.food_cost_pct)}</b></div><div><small>Önerilen fiyat (%${p.target_margin} net)</small><b>${p.suggested_with_overhead ? money(p.suggested_with_overhead) : "—"}</b></div></div>
 <div class="rest">${restaurants.map((r) => `<span>${esc(r.name)}: <b>${p.has_recipe ? money(p.per_restaurant[r.id].cost) : "—"}</b>${p.per_restaurant[r.id].missing.length ? " (eksik fiyat)" : ""}</span>`).join("")}</div></section>`;
 const printCards = (products, restaurants) => {
   const w = window.open("", "_blank");
@@ -65,7 +65,7 @@ function OverheadPanel({ info, onSaved }) {
 
 function CostSummary({ data }) {
   const s = data.summary;
-  const worst = [...data.products].filter((p) => p.has_recipe && p.price).sort((a, b) => a.net_margin - b.net_margin)[0];
+  const worst = [...data.products].filter((p) => p.cost > 0 && p.price).sort((a, b) => a.net_margin - b.net_margin)[0];
   const cards = [["Tarifi olan ürün", `${s.with_recipe} / ${s.products}`, "cost-tile"], ["Ortalama gıda maliyeti", pct(s.avg_food_cost_pct), "cost-tile amber"], ["Sabit giderle zarar eden", `${s.losing} ürün`, s.losing ? "cost-tile red" : "cost-tile green"], ["En düşük net marj", worst ? `${worst.name} · ${pct(worst.net_margin)}` : "—", "cost-tile"]];
   return <div className="cost-summary">{cards.map(([label, value, cls], i) => <div key={label} className={cls} data-testid={`cost-summary-${i}`}><span>{label}</span><strong>{value}</strong></div>)}</div>;
 }
@@ -77,11 +77,11 @@ function CostRow({ p, restaurants, open, onToggle, onEdit, onWizard }) {
       <div className={`table-row cost-grid ${open ? "open" : ""}`} data-testid={`cost-row-${p.id}`} onClick={onToggle} role="button" tabIndex={0}>
         <span className="cost-name">{p.lines.length ? (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <i className="cost-spacer" />}<span><b>{p.name}</b><small className="muted block">{p.category}</small></span></span>
         <span className="table-amount">{money(p.price)}</span>
-        <span className="table-amount" data-testid={`cost-avg-${p.id}`}>{p.has_recipe ? money(p.cost) : <button className="text-button tiny" data-testid={`cost-add-recipe-${p.id}`} onClick={(e) => { e.stopPropagation(); onWizard(p.id); }}>+ Sorularla tarif ekle</button>}</span>
+        <span className="table-amount" data-testid={`cost-avg-${p.id}`}>{p.has_recipe ? money(p.cost) : <>{p.cost > 0 && <span className="block">{money(p.cost)} <small className="muted">elle</small></span>}<button className="text-button tiny" data-testid={`cost-add-recipe-${p.id}`} onClick={(e) => { e.stopPropagation(); onWizard(p.id); }}>+ Sorularla tarif ekle</button></>}</span>
         <span data-testid={`cost-overhead-${p.id}`}>{p.overhead_cost ? money(p.overhead_cost) : "—"}<small className="muted block">tam {money(p.full_cost)}</small></span>
         {restaurants.map((r) => { const c = p.per_restaurant[r.id]; return <span key={r.id} data-testid={`cost-${r.id}-${p.id}`} title={c.missing.length ? `Fiyatı eksik: ${c.missing.join(", ")}` : ""}>{p.has_recipe ? <>{money(c.cost)}{c.missing.length > 0 && <em className="missing-badge">eksik</em>}</> : "—"}</span>; })}
         <span className={p.net_profit < 0 ? "danger-inline" : below ? "amber-text" : "green-text"} data-testid={`cost-margin-${p.id}`}>{p.cost > 0 ? pct(p.net_margin) : "—"}<small className="muted block">malzeme {pct(p.margin)}</small></span>
-        <span data-testid={`cost-suggested-${p.id}`}>{p.suggested_with_overhead ? money(p.suggested_with_overhead) : p.suggested_price ? money(p.suggested_price) : "—"}<small className="muted block">%{p.target_margin} net hedef</small></span>
+        <span data-testid={`cost-suggested-${p.id}`}>{p.suggested_with_overhead ? money(p.suggested_with_overhead) : "—"}<small className="muted block">{p.cost > 0 && !p.suggested_with_overhead ? "hedef + sabit gider %100'ü aşıyor" : `%${p.target_margin} net hedef`}</small></span>
       </div>
       {open && p.lines.length > 0 && (
         <div className="cost-lines" data-testid={`cost-lines-${p.id}`}>
@@ -102,7 +102,7 @@ function CostCalculator({ inventory, onCreate, ratio = 0 }) {
   const lines = rows.map((r) => { const item = inventory.find((i) => i.id === r.inventory_id); return { ...r, item, cost: item ? Number(r.amount || 0) * avg(item) : 0 }; });
   const total = lines.reduce((s, l) => s + l.cost, 0);
   const room = 1 - margin / 100 - ratio / 100;
-  const suggested = total > 0 && room > 0.01 ? Math.ceil(total / room) : 0;
+  const suggested = total > 0 && room > 0.01 ? Math.ceil(Number((total / room).toFixed(6))) : 0;
   const realMargin = Number(price) > 0 ? ((Number(price) * (1 - ratio / 100) - total) / Number(price)) * 100 : null;
   const update = (i, patch) => setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   return (
@@ -123,7 +123,7 @@ function CostCalculator({ inventory, onCreate, ratio = 0 }) {
         <label>Hedef kâr marjı (%)<input type="number" min="0" max="99" value={margin} data-testid="calc-margin" onChange={(e) => setMargin(Number(e.target.value))} /></label>
         <label>Düşündüğünüz satış fiyatı (₺)<input type="number" min="0" value={price} placeholder="isteğe bağlı" data-testid="calc-price" onChange={(e) => setPrice(e.target.value)} /></label>
         <div><span>Toplam maliyet</span><strong data-testid="calc-total">{money(total)}</strong></div>
-        <div><span>Önerilen fiyat{ratio ? ` (sabit gider %${String(ratio).replace(".", ",")} dahil)` : ""}</span><strong className="amber-text" data-testid="calc-suggested">{money(suggested)}</strong></div>
+        <div><span>Önerilen fiyat{ratio ? ` (sabit gider %${String(ratio).replace(".", ",")} dahil)` : ""}</span><strong className="amber-text" data-testid="calc-suggested">{total > 0 && !suggested ? "—" : money(suggested)}</strong>{total > 0 && !suggested && <small className="danger-inline block" data-testid="calc-suggested-note">Hedef marj + sabit gider oranı %100'ü aşıyor; hedefi düşürün</small>}</div>
         {realMargin != null && <div><span>Bu fiyatla net marj</span><strong className={realMargin < margin ? "danger-inline" : "green-text"} data-testid="calc-real-margin">%{realMargin.toFixed(1).replace(".", ",")}</strong></div>}
       </div>
       <button className="primary-button" disabled={!total} data-testid="calc-create-product" onClick={() => onCreate({ recipe: lines.filter((l) => l.item && Number(l.amount) > 0).map((l) => ({ inventory_id: l.inventory_id, amount: l.amount })), price: Number(price) || suggested, target_margin: margin })}><Plus size={15} /> Bu tarifle menüye ürün ekle</button>

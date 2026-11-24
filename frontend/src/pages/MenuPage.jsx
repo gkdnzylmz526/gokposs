@@ -7,6 +7,7 @@ const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currenc
 export default function MenuPage() {
   const [menu, setMenu] = useState(null);
   const [error, setError] = useState(false);
+  const [zoom, setZoom] = useState(null);
   useEffect(() => { document.title = "GÖKBOSS · Menü"; axios.get(`${API}/public/menu`).then(({ data }) => setMenu(data)).catch(() => setError(true)); }, []);
   return (
     <div className="qr-menu" data-testid="public-menu">
@@ -16,10 +17,16 @@ export default function MenuPage() {
       {menu?.categories.map((c, i) => (
         <section key={c.category} className="qr-cat" data-testid={`menu-category-${i}`} style={{ animationDelay: `${i * 60}ms` }}>
           <h2>{c.category}</h2>
-          {c.items.map((it, j) => <div className="qr-item" key={it.name} data-testid={`menu-item-${i}-${j}`}><span>{it.name}</span><i /><b>{money(it.price)}</b></div>)}
+          {c.items.map((it, j) => (
+            <div className={`qr-item ${it.photo_url ? "with-photo" : ""}`} key={it.name} data-testid={`menu-item-${i}-${j}`}>
+              {it.photo_url && <button className="qr-thumb" data-testid={`menu-photo-${i}-${j}`} onClick={() => setZoom(it)}><img src={`${process.env.REACT_APP_BACKEND_URL}${it.photo_url}`} alt={it.name} loading="lazy" /></button>}
+              <div className="qr-text"><div className="qr-line"><span>{it.name}</span><i /><b>{money(it.price)}</b></div>{it.description && <small>{it.description}</small>}</div>
+            </div>
+          ))}
         </section>
       ))}
       <footer>Afiyet olsun</footer>
+      {zoom && <div className="qr-zoom" data-testid="menu-photo-zoom" onClick={() => setZoom(null)}><img src={`${process.env.REACT_APP_BACKEND_URL}${zoom.photo_url}`} alt={zoom.name} /><p><b>{zoom.name}</b> · {money(zoom.price)}{zoom.description && <small>{zoom.description}</small>}</p></div>}
     </div>
   );
 }
