@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 21: manual cash book (incomes, expense payment, purchase invoices with pay/unpay + object-storage files), product_sales setting, wizard-recipe for existing products, cost-card printing and report export. Backend: new pytest file with 12 tests, all passing (CRUD, totals in reports/dashboard/reconciliation, backdated created_at at noon, only-cash expenses in recon, invoice create forces Ödenmedi, PUT keeps status/files/expense_id and syncs the expense amount, pay 409/404/422, unpay deletes expense, deleting a linked expense resets the invoice, deleting an invoice deletes its expense, real upload/download/soft-delete of png+pdf, 422 for txt/empty/11th file, 404 from another restaurant, settings in /me and dashboard, wizard-recipe 404/422 and cost, XLSX/PDF export with Gelir Kayıtları and Ödeme column). Regression: iteration20 wizard, reporting and export tests pass after updating one outdated label assertion. Frontend (desktop, admin): nav hides Satışlar/Masalar/Mutfak by default; 'Gelir gir' and quick-income open the income modal with Nakit/POS satış defaults; Kasa cash book incomes add/edit/delete with live recon (+ Nakit gelir / − Nakit gider / Beklenen); expenses tab with payment select; invoices tiles (unpaid/overdue/due-soon), filters, add, upload, file opened as a blob in a new tab, file delete, pay with Nakit (writes expense, recon drops), pay with Havale without expense, unpay, delete; Ürün Maliyeti 'Sorularla tarif ekle' wizard starts at the ingredient question, price prefilled with the current price (150), save toast 'tarifi kaydedildi', cost updates; single and all cost-card print windows render the correct content; settings switch shows and hides the nav items and changes the Overview button; all-mode income save shows 'Bu işlem için üstten bir restoran seçin'. No core defects found, only minor UX and code issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/invoices/{id}/pay", "issue": "The check and the update are not atomic: it reads status and later runs update_one. A double click or two concurrent requests can both pass the Ödenmedi check and insert two linked expenses. Use find_one_and_update({id, status:'Ödenmedi'}, ...) and insert the expense only if it succeeds."},
+      {"endpoint": "GET /api/reports/export (all mode, exports._restaurant_section)", "issue": "The per-restaurant summary has payment columns only for Nakit, Kart and Yemek kartı. Havale incomes are counted in Ciro but have no column. PAYMENTS includes Havale, so the export is inconsistent."},
+      {"endpoint": "POST /api/invoices/{id}/files", "issue": "Reads the whole upload into memory before checking the 10 MB limit. Acceptable, but checking request content-length first would be safer."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Overview with product_sales off", "issue": "The 'Son satışlar' panel still lists product sales only, and its '+ Yeni ekle' opens the sales modal even though product sales are hidden. It should show recent incomes / open the income modal.", "affected_selectors": ["[data-testid='view-sales-button']"]},
+      {"flow": "Reports with product_sales off", "issue": "The 'En çok satan ürünler' section is still shown (empty 'Bu dönem için ürün bazlı satış yok.'). Consider hiding it when the setting is off.", "affected_selectors": [".top-products"]},
+      {"flow": "All-restaurants mode on Kasa", "issue": "add-income-button, add-book-expense-button and add-invoice-button are enabled. The user fills the form, then gets the 'üstten bir restoran seçin' toast. Disable the buttons or show a hint in all mode.", "affected_selectors": ["[data-testid='add-income-button']", "[data-testid='add-invoice-button']"]}
+    ],
+    "design_issues": [
+      {"screen": "Kasa > Manuel kayıtlar (cash-book panel)", "issues": ["The panel header (h3 'Manuel kayıtlar' and subtitle) has no horizontal padding and sits flush against the left border, while the tabs and rows are indented by about 18px."]},
+      {"screen": "Invoice pay dialog", "issues": ["invoice-pay-date uses the native browser <input type='date'> instead of the app's DatePicker component used everywhere else."]},
+      {"screen": "Kasa recon card", "issues": ["With no closing recorded (has_closing false), the badge shows 'Fark var' and 'Beklenenle fark −₺1.100' as soon as an income is entered. This is misleading before the day is closed."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration21_cashbook_invoices.py", "/app/backend/tests/ui_setup_it21.py", "/app/test_reports/pytest/pytest_iter21.xml"],
+  "action_items": [
+    "Make invoice pay idempotent/atomic (find_one_and_update on status Ödenmedi) to avoid duplicate expenses on double click",
+    "Add a Havale column to the export restaurant summary (exports.py _restaurant_section)",
+    "When product_sales is off: show incomes in the Overview 'Son satışlar' panel (or relabel it) and point '+ Yeni ekle' to the income modal; hide 'En çok satan ürünler' on Reports",
+    "Add padding to the cash-book panel-head",
+    "Use the DatePicker component in the invoice pay dialog",
+    "Optional: disable add buttons in the cash book in all mode"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1818 lines (>700). Split cash book, invoices, files, settings and wizard into routers.",
+    "pay_invoice has a race condition (see backend minor).",
+    "CashBook InvoiceFiles.open opens about:blank and then sets the blob URL. This works in Chrome, but some mobile browsers or popup blockers may block it. The fallback replaces the current page with the blob URL.",
+    "The dashboard returns invoices with to_list(300) unscoped by date and no pagination. Fine for now.",
+    "The printCards HTML is properly escaped (esc)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration21_cashbook_invoices.py", "/app/backend/tests/ui_setup_it21.py", "/app/backend/tests/test_exports.py (label 'Satış adedi (işlem)' -> 'Kayıt adedi (işlem)')"],
+  "success_rate": {"backend": "100% (12/12 new + regression 21/21 after test label fix)", "frontend": "100% of tested flows; 3 minor UX integration issues"},
+  "test_credentials": "Admin gokboss-admin+clerk_test@example.com via tests/clerk_ticket.py (new ticket per browser session)",
+  "seed_data_creation": "None kept. All TEST_ incomes, expenses, invoices, products and inventory (TEST_P21_*, TEST_UI21_Un, TEST_UI_Gozleme) were deleted by id. Setting product_sales was restored to false. Product 'adana' is untouched. Soft-deleted TEST file records remain in db.files (is_deleted true) by design.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run backend tests with -n 0 and export REACT_APP_BACKEND_URL (test_exports and test_reporting_features read it from the environment). System date is 2026-11-24. Not tested: StaffApp tabs hidden when product_sales is off (no staff session used), HEIC upload, the >10MB limit, mobile layout. The UI dialog handler needs 'import asyncio' inside the browser_automation script.",
+  "rca of the issue": ""
+}

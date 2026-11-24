@@ -89,7 +89,7 @@ def test_excel_export(s, seeded, period):
     assert rows["Toplam ciro"] == rep["revenue"]
     assert rows["Toplam gider"] == rep["expenses"]
     assert rows["Net kâr"] == rep["profit"]
-    assert rows["Satış adedi (işlem)"] == rep["sales_count"]
+    assert rows["Kayıt adedi (işlem)"] == rep["sales_count"]  # label renamed in iteration 21 (incomes count too)
     assert "TEST_Çiğ köfte Şiş İğne" in texts
     assert "TEST_ağır yük ÜÇÖ" in texts
 

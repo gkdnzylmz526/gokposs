@@ -165,3 +165,10 @@
 - Product wizard ("Sorularla ürün ekle", ProductWizard.jsx) on Menü Ürünleri & Ürün Maliyeti: name → category → ingredient loop (known from stock or new: unit + price) → amount (gr/kg, ml/lt toggle) → target margin → sale price → summary; live recap cost.
 - POST /api/products/wizard: new ingredients created in all 3 restaurants (qty 0, same price), zero-price items filled, duplicate name 409.
 - Fixes: picking current restaurant no longer stuck loading; wizard mobile width; category dedupe; copied ingredient keeps original name. Tested iteration_20 (backend 100%, frontend 95% → fixed). Redeploy requested.
+
+## Iteration 21 (Haziran 2026)
+- User runs a separate ordering POS; goal = cost calculation + manual revenue entry. Product-based sales (Satışlar/Masalar/Mutfak) hidden by default via settings.product_sales (Kullanıcılar > switch).
+- Kasa > Manuel kayıtlar (CashBook.jsx): Gelirler (incomes: date, amount, payment Nakit/Kart/Yemek kartı/Havale, category, note), Giderler (expense.payment; only Nakit expenses reduce cash), Faturalar (invoices with due date, VAT, pay/unpay → linked expense, overdue/due-soon tiles, photo/PDF upload via Emergent object storage storage.py, /api/files/{id}).
+- Incomes count in revenue, payments, dashboard, reconciliation, exports (Gelir Kayıtları, Havale column).
+- Existing products: "Sorularla tarif ekle" wizard (/api/products/{id}/wizard-recipe). Printable cost cards (single + all) on Ürün Maliyeti.
+- Tested iteration_21 (100%); minor UX fixes applied after. Redeploy requested.

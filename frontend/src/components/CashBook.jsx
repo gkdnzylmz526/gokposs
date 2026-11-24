@@ -3,6 +3,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { CheckCircle2, FileText, Paperclip, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { errorText } from "@/lib/restaurant";
+import { DatePicker } from "@/components/DatePicker";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
@@ -49,7 +50,7 @@ function PayDialog({ invoice, onClose, onDone }) {
       <span className="eyebrow">FATURA ÖDEMESİ</span><h2>{invoice.supplier} · {money(invoice.amount)}</h2>
       <div className="form-grid">
         <div className="staff-channels">{["Nakit", "Kart", "Havale"].map((p) => <button key={p} className={`report-tab ${payment === p ? "active" : ""}`} data-testid={`invoice-pay-${p}`} onClick={() => setPayment(p)}>{p}</button>)}</div>
-        <label>Ödeme tarihi<input type="date" value={date} max={today()} data-testid="invoice-pay-date" onChange={(e) => setDate(e.target.value)} /></label>
+        <DatePicker label="Ödeme tarihi" testId="invoice-pay-date" value={date} max={today()} onChange={(v) => setDate(v || today())} />
         <label className="check-line"><input type="checkbox" checked={record} data-testid="invoice-pay-record" onChange={(e) => setRecord(e.target.checked)} /> Giderlere de yaz {payment === "Nakit" ? "(kasadan düşer)" : "(kasayı etkilemez)"}</label>
       </div>
       <button className="primary-button full" disabled={busy} data-testid="invoice-pay-save" onClick={save}><CheckCircle2 size={16} /> Ödendi olarak işaretle</button>
@@ -116,12 +117,14 @@ function InvoiceList({ items, onAdd, onEdit, onDelete, onReload }) {
   );
 }
 
-export const CashBook = ({ data, onAdd, onEdit, onDelete, onReload }) => {
+export const CashBook = ({ data, onAdd: add, onEdit, onDelete, onReload }) => {
   const [tab, setTab] = useState("incomes");
+  const all = data.restaurant_id === "all";
+  const onAdd = (...args) => (all ? toast.error("Kayıt eklemek için üstten bir restoran seçin") : add(...args));
   const tabs = [["incomes", "Gelirler", data.incomes.length], ["expenses", "Giderler", data.expenses_list.length], ["invoices", "Faturalar", data.invoices.filter((i) => i.status === "Ödenmedi").length]];
   return (
     <section className="panel table-panel cash-book" data-testid="cash-book">
-      <div className="panel-head"><div><h3>Manuel kayıtlar</h3><span className="muted">POS'unuzdaki ciroyu, giderleri ve faturaları buraya girin; kasa hesabı ve raporlar otomatik güncellenir</span></div></div>
+      <div className="panel-head book-title"><div><h3>Manuel kayıtlar</h3><span className="muted">POS'unuzdaki ciroyu, giderleri ve faturaları buraya girin; kasa hesabı ve raporlar otomatik güncellenir</span></div></div>
       <div className="book-tabs">{tabs.map(([k, l, n]) => <button key={k} className={tab === k ? "active" : ""} data-testid={`cash-book-tab-${k}`} onClick={() => setTab(k)}>{l}{n > 0 && <span>{n}</span>}</button>)}</div>
       {tab === "incomes" && <IncomeList items={data.incomes} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />}
       {tab === "expenses" && <ExpenseList items={data.expenses_list} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />}

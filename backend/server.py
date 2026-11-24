@@ -1612,8 +1612,9 @@ async def _invoice(invoice_id: str) -> Dict[str, Any]:
 
 @api.post("/invoices/{invoice_id}/pay")
 async def pay_invoice(invoice_id: str, body: InvoicePayIn, request: Request):
-    inv = await _invoice(invoice_id)
-    if inv["status"] == "Ödendi":
+    await _invoice(invoice_id)
+    inv = await db.invoices.find_one_and_update({"id": invoice_id, "status": "Ödenmedi"}, {"$set": {"status": "Ödendi"}}, projection={"_id": 0})
+    if not inv:
         raise HTTPException(status_code=409, detail="Fatura zaten ödenmiş")
     day = body.date or datetime.now(TZ).date().isoformat()
     expense_id = ""

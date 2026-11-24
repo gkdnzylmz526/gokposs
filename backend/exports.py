@@ -39,11 +39,11 @@ def _restaurant_section(report: dict) -> list:
         return []
     def line(r):
         rec, pay = r["reconciliation"], r["payments"]
-        return [r["name"], r["sales_count"], r["revenue"], r["expenses"], r["profit"], pay.get("Nakit", 0), pay.get("Kart", 0), pay.get("Yemek kartı", 0),
+        return [r["name"], r["sales_count"], r["revenue"], r["expenses"], r["profit"], pay.get("Nakit", 0), pay.get("Kart", 0), pay.get("Yemek kartı", 0), pay.get("Havale", 0),
                 rec["expected_closing"], rec["actual_closing"] if rec["has_closing"] else "Girilmedi", rec["difference"] if rec["has_closing"] else "-"]
     total = {"name": "TOPLAM", "sales_count": sum(r["sales_count"] for r in rows), "revenue": report["revenue"], "expenses": report["expenses"], "profit": report["profit"],
-             "payments": {k: sum(r["payments"].get(k, 0) for r in rows) for k in ("Nakit", "Kart", "Yemek kartı")}, "reconciliation": report["reconciliation"]}
-    return [("Restoran Bazlı Özet", ["Restoran", "İşlem", "Ciro", "Gider", "Kâr", "Nakit", "Kart", "Yemek kartı", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"],
+             "payments": {k: sum(r["payments"].get(k, 0) for r in rows) for k in ("Nakit", "Kart", "Yemek kartı", "Havale")}, "reconciliation": report["reconciliation"]}
+    return [("Restoran Bazlı Özet", ["Restoran", "İşlem", "Ciro", "Gider", "Kâr", "Nakit", "Kart", "Yemek kartı", "Havale", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"],
              [line(r) for r in rows] + [line(total)])]
 
 
@@ -69,7 +69,7 @@ def _sections(report: dict) -> list:
         [i["name"], i.get("quantity", 0), i.get("minimum", 0), i.get("unit", "")] for i in report["low_stock"]])] if "low_stock" in report else [])
 
 
-MONEY_HEADERS = {"Tutar", "Ciro", "Maliyet", "Kâr", "Birim fiyat", "Gider", "Nakit", "Kart", "Yemek kartı", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"}
+MONEY_HEADERS = {"Tutar", "Ciro", "Maliyet", "Kâr", "Birim fiyat", "Gider", "Nakit", "Kart", "Yemek kartı", "Havale", "Beklenen kasa", "Gerçek kasa", "Kasa farkı"}
 
 
 def build_excel(report: dict) -> bytes:

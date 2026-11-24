@@ -168,3 +168,4 @@
 .cost-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; } .cost-toolbar .secondary-button { display:inline-flex; gap:6px; align-items:center; margin-left:auto; }
 @media(max-width:800px){ .invoice-row { grid-template-columns:1fr; } .invoice-money,.invoice-actions { justify-items:start; text-align:left; } .invoice-actions { grid-auto-flow:column; justify-content:start; align-items:center; } .invoice-summary { grid-template-columns:1fr; } }
 .staff-tabs:has(> button:only-child) { grid-template-columns:1fr; }
+.book-title { padding:18px 22px 6px; }
