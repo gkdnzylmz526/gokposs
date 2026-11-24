@@ -3,10 +3,10 @@ import { Check, X } from "lucide-react";
 
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
 
-export const suggestedPrice = (product) => { const margin = Number(product.target_margin) || 65; return product.cost > 0 && margin < 100 ? Math.ceil(product.cost / (1 - margin / 100)) : null; };
+export const suggestedPrice = (product, ratio = 0) => { const margin = Number(product.target_margin) || 65; const room = 1 - margin / 100 - ratio / 100; return product.cost > 0 && room > 0.01 ? Math.ceil(Number((product.cost / room).toFixed(6))) : null; };
 
-export const BulkPriceDialog = ({ products, onClose, onApply }) => {
-  const changes = products.map((p) => ({ ...p, suggested: suggestedPrice(p) })).filter((p) => p.suggested && p.suggested !== p.price);
+export const BulkPriceDialog = ({ products, ratio = 0, onClose, onApply }) => {
+  const changes = products.map((p) => ({ ...p, suggested: suggestedPrice(p, ratio) })).filter((p) => p.suggested && p.suggested !== p.price);
   const [selected, setSelected] = useState(() => new Set(changes.map((p) => p.id)));
   const toggle = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (

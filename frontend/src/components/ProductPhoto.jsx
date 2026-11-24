@@ -14,7 +14,9 @@ const shrink = (file) => new Promise((resolve) => {
     const scale = Math.min(1, 1200 / Math.max(img.width, img.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
-    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
     canvas.toBlob((blob) => resolve(blob ? new File([blob], "urun.jpg", { type: "image/jpeg" }) : file), "image/jpeg", 0.85);
   };

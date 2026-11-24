@@ -348,7 +348,7 @@ async def dashboard():
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
     all_inventory = await db.raw.inventory.find({}, {"_id": 0, "id": 1, "name": 1, "unit": 1, "unit_cost": 1, "restaurant_id": 1, "created_at": 1}).sort("created_at", 1).to_list(None)
     extra = {"all_inventory": all_inventory, "tables": await db.tables.find({}, {"_id": 0}).sort("name", 1).to_list(None), "tips": await list_items("tips"),
-             "attendance": await list_items("attendance", limit=300), "restaurant_id": current_rid.get(),
+             "attendance": await list_items("attendance", limit=300), "restaurant_id": current_rid.get(), "overhead_ratio": (await overhead_info())["ratio_pct"],
              "incomes": await list_items("incomes", limit=300), "invoices": await db.invoices.find({}, {"_id": 0}).sort("date", -1).to_list(300), "settings": await app_settings()}
     return {**extra, "revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests, "waste": waste}
 
@@ -822,10 +822,11 @@ async def dismiss_price_alert(alert_id: str):
         raise HTTPException(status_code=404, detail="Uyarı bulunamadı")
     return {"ok": True}
 
-def suggested_price(product: Dict[str, Any]) -> float | None:
+def suggested_price(product: Dict[str, Any], ratio_pct: float = 0) -> float | None:
     margin = float(product.get("target_margin") or 0) or 65
     cost = float(product.get("cost", 0))
-    return math.ceil(round(cost / (1 - margin / 100), 6)) if cost > 0 and margin < 100 else None
+    room = 1 - margin / 100 - ratio_pct / 100
+    return math.ceil(round(cost / room, 6)) if cost > 0 and room > 0.01 else None
 
 class WizardIngredient(BaseModel):
     name: str = Field(min_length=1, max_length=80)
@@ -894,8 +895,9 @@ async def product_wizard_recipe(product_id: str, body: WizardRecipeIn, request: 
 async def apply_suggested_prices(payload: Dict[str, List[str]], request: Request):
     ids = set(payload.get("product_ids", []))
     changed = []
+    ratio = (await overhead_info())["ratio_pct"]
     for product in await list_items("products", limit=None):
-        price = suggested_price(product)
+        price = suggested_price(product, ratio)
         if product["id"] in ids and price and price != float(product.get("price", 0)):
             await db.products.update_one({"id": product["id"]}, {"$set": {"price": price}})
             changed.append({"id": product["id"], "name": product["name"], "old_price": product.get("price", 0), "new_price": price})
@@ -1757,7 +1759,10 @@ async def public_photo(file_id: str):
     record = await db.files.find_one({"id": file_id, "kind": "product_photo", "is_deleted": False}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı")
-    data, _ = await asyncio.to_thread(get_object, record["storage_path"])
+    try:
+        data, _ = await asyncio.to_thread(get_object, record["storage_path"])
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı") from exc
     return Response(content=data, media_type=record["content_type"], headers={"Cache-Control": "public, max-age=86400"})
 
 @api.get("/files/{file_id}")
@@ -1884,6 +1889,8 @@ def make_crud(name: str, model: type[BaseModel]):
             await db.expenses.delete_many({"id": old["expense_id"]})
         if name == "invoices":
             await db.files.update_many({"invoice_id": item_id}, {"$set": {"is_deleted": True}})
+        if name == "products":
+            await db.files.update_many({"product_id": item_id}, {"$set": {"is_deleted": True}})
         if name == "waste":
             await apply_waste(old, -1, "Fire silindi (stok iade)")
         if name == "orders" and old.get("expense_id"):

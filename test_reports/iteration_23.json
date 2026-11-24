@@ -1,0 +1,37 @@
+{
+  "summary": "Tested product photo upload (object storage), public photo endpoint, public QR menu (photo + description, zoom, 390px mobile), edit-modal description, and the iteration-22 overhead follow-ups. Backend: 15/15 new tests pass (1 skipped: no live invoice file in DB, so a fresh-invoice test was added and passes), and the iteration-22 regression (8) passes. Frontend: every flow I tested works. Real admin UI on product 'adana': add photo shrinks a 2000x1500 PNG to a 1200x900 JPEG; a bad file shows an error toast; Değiştir replaces the photo; Sil removes it; editing the description keeps the photo; /menu shows the thumbnail, opens the zoom overlay and closes it; with no photo the menu falls back to the plain layout; no horizontal scroll at 390px. Follow-ups checked: cost-suggested shows '—' with the note when ratio is 40% and target is 65%; manual cost shows '₺100,00 elle'; at 90% overhead adana is counted in 'Sabit giderle zarar eden: 1 ürün' and 'En düşük net marj: adana · %-8,9'; overhead inputs use dark text rgb(30,41,59) on white. The UI check of calc-suggested-note was not possible because the cost calculator has no inventory items to pick (the dropdown is empty); I only verified it by reading the code.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/products/{id}", "issue": "Deleting a product does not mark its photo file is_deleted, so /api/public/photos/{id} still serves the image publicly after the product is gone"},
+      {"endpoint": "GET /api/public/photos/{file_id}", "issue": "If get_object fails in storage (missing object), the error is not handled and the endpoint returns 500 instead of 404"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Menü Ürünleri product card", "issues": ["The SuggestedPrice box still shows the material-only price ('Önerilen fiyat ₺286 · %65 marj'), while Ürün Maliyeti shows '—' because target + overhead is at least 100%. The two pages contradict each other"]},
+      {"screen": "Ürün Maliyeti", "issues": ["Negative percent is rendered as '%-8,9'; Turkish convention would be '-%8,9'"]},
+      {"screen": "ProductPhoto shrink", "issues": ["Transparent PNGs are converted to JPEG with no background fill, so transparent areas turn black. Fill the canvas with white before drawImage"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration23_product_photo.py", "/app/test_reports/pytest/iteration23.xml"],
+  "action_items": [
+    "Optional: when a product is deleted, mark its photo file is_deleted",
+    "Optional: wrap get_object in public_photo in try/except and return 404",
+    "Optional: make the product-card SuggestedPrice overhead-aware, or label it 'malzeme' so it matches Ürün Maliyeti",
+    "Optional: fill the canvas with white in shrink() for transparent PNGs"
+  ],
+  "critical_code_review_comments": [
+    "public_photo has no error handling around get_object (a missing object returns 500)",
+    "The product delete path does not clean up the photo record",
+    "upload_product_photo validates by file extension only, not by content (acceptable because only admins can upload)"
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration23_product_photo.py"],
+  "success_rate": {"backend": "100%", "frontend": "100% of the flows tested (calculator note checked by code review only)"},
+  "seed_data_creation": "None left behind. A TEST_ product and a TEST_ invoice (with its file) were created and deleted. On adana, the photo I uploaded was removed through the UI and its description was reset to ''. settings{id:'overhead'} was deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest tests/test_iteration23_product_photo.py -n 0 -p no:randomly. Use the module-level fixture: it creates and deletes the TEST_ product. Adana id cc3c4123-8e75-48bd-9ab6-781aac6a16e6 has no photo and an empty description. Set overhead with PUT /api/overhead using X-Restaurant: all. The inventory available to the calculator is empty, so calc UI tests need a TEST_ inventory item with unit_cost."
+}

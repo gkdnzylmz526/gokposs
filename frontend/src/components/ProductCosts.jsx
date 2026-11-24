@@ -6,7 +6,7 @@ import { errorText } from "@/lib/restaurant";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
-const pct = (n) => (n == null ? "—" : `%${Number(n).toLocaleString("tr-TR")}`);
+const pct = (n) => (n == null ? "—" : `${n < 0 ? "-" : ""}%${Math.abs(Number(n)).toLocaleString("tr-TR")}`);
 
 const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const card = (p, restaurants) => `<section class="card"><header><div><small>${esc(p.category)}</small><h2>${esc(p.name)}</h2></div><div class="price">${money(p.price)}<small>satış fiyatı</small></div></header>
