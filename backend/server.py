@@ -7,6 +7,7 @@ import re
 import logging
 import os
 import uuid
+from urllib.parse import quote
 from contextlib import suppress
 from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
@@ -28,6 +29,7 @@ from pydantic import BaseModel, Field
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
+from storage import APP_PREFIX, get_object, init_storage, put_object
 from scope import DEFAULT_RESTAURANT, RESTAURANT_IDS, RESTAURANT_NAMES, RESTAURANTS, SCOPED, ScopedDB, current_rid, specific_rid
 db = ScopedDB(client[os.environ["DB_NAME"]])
 try:  # launched as `backend.server` (the default)
@@ -78,7 +80,7 @@ async def current_member(request: Request) -> Dict[str, Any]:
 STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
-ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests)(/.*)?|/api/staff/[\w-]+/request-link"
+ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -101,6 +103,10 @@ def _label(collection: str, doc: Dict[str, Any] | None) -> str:
         return f"{doc.get('date', '')} · {doc.get('amount', 0):g} ₺{' · ' + doc['note'] if doc.get('note') else ''}"
     if collection == "tables":
         return f"Masa {doc.get('name', '')}"
+    if collection == "incomes":
+        return f"{doc.get('date', '')} · {doc.get('category', '')} · {doc.get('amount', 0):g} ₺ {doc.get('payment', '')}"
+    if collection == "invoices":
+        return f"{doc.get('supplier', '')} · {doc.get('invoice_no') or 'no yok'} · {doc.get('amount', 0):g} ₺"
     return str(doc.get("name") or doc.get("supplier") or doc.get("id", ""))
 
 async def audit(request: Request, action: str, collection: str, item_id: str, doc: Dict[str, Any] | None = None, detail: str = "") -> None:
@@ -160,6 +166,8 @@ class PurchaseItem(BaseModel):
 class ExpenseEntry(Entry):
     category: str = "Diğer"
     amount: float = 0
+    payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Havale|Yemek kartı)$")
+    invoice_id: str = ""
     note: str = ""
     supplier: str = ""
     purchases: List[PurchaseItem] = []
@@ -252,6 +260,28 @@ class ProductEntry(Entry):
     cost_from_recipe: bool = False
     target_margin: float = 0
 
+class IncomeEntry(Entry):
+    date: str = Field(pattern=DATE_PATTERN)
+    amount: float = Field(gt=0)
+    payment: str = Field(default="Nakit", pattern="^(Nakit|Kart|Yemek kartı|Havale)$")
+    category: str = Field(default="POS satış", min_length=1, max_length=40)
+    note: str = Field(default="", max_length=300)
+
+class InvoiceEntry(Entry):
+    invoice_no: str = Field(default="", max_length=40)
+    supplier: str = Field(min_length=1, max_length=80)
+    date: str = Field(pattern=DATE_PATTERN)
+    due_date: str = Field(default="", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    amount: float = Field(gt=0)
+    vat_rate: float = Field(default=20, ge=0, le=100)
+    category: str = Field(default="Malzeme alımı", max_length=40)
+    note: str = Field(default="", max_length=300)
+    status: str = Field(default="Ödenmedi", pattern="^(Ödenmedi|Ödendi)$")
+    paid_at: str = ""
+    paid_payment: str = ""
+    expense_id: str = ""
+    files: List[Dict[str, Any]] = []
+
 class TableEntry(Entry):
     name: str = Field(min_length=1)
     seats: int = Field(default=4, ge=1)
@@ -277,7 +307,7 @@ class WasteEntry(Entry):
     unit: str = ""
     cost: float = 0
 
-COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry, "waste": WasteEntry, "tables": TableEntry, "tips": TipEntry, "attendance": AttendanceEntry}
+COLLECTIONS = {"sales": SalesEntry, "expenses": ExpenseEntry, "inventory": InventoryEntry, "staff": StaffEntry, "cash": CashEntry, "products": ProductEntry, "suppliers": SupplierEntry, "shifts": ShiftEntry, "leaves": LeaveEntry, "advances": AdvanceEntry, "orders": OrderEntry, "waste": WasteEntry, "tables": TableEntry, "tips": TipEntry, "attendance": AttendanceEntry, "incomes": IncomeEntry, "invoices": InvoiceEntry}
 
 async def list_items(collection: str, since: str | None = None, limit: int | None = 100, until: str | None = None) -> List[Dict[str, Any]]:
     query = {"created_at": {k: v for k, v in (("$gte", since), ("$lt", until)) if v}} if since or until else {}
@@ -306,7 +336,7 @@ async def dashboard():
     shifts = await db.shifts.find({}, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(None)
     today = datetime.now(TZ).date()
     week_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
-    week_sales = await list_items("sales", week_start, None)
+    week_sales = await list_items("sales", week_start, None) + await list_items("incomes", week_start, None)
     week_expenses = await list_items("expenses", week_start, None)
     weekly = []
     for offset in range(6, -1, -1):
@@ -316,7 +346,8 @@ async def dashboard():
     low_stock = sum(1 for item in inventory if float(item.get("quantity", 0)) <= float(item.get("minimum", 0)))
     all_inventory = await db.raw.inventory.find({}, {"_id": 0, "id": 1, "name": 1, "unit": 1, "unit_cost": 1, "restaurant_id": 1, "created_at": 1}).sort("created_at", 1).to_list(None)
     extra = {"all_inventory": all_inventory, "tables": await db.tables.find({}, {"_id": 0}).sort("name", 1).to_list(None), "tips": await list_items("tips"),
-             "attendance": await list_items("attendance", limit=300), "restaurant_id": current_rid.get()}
+             "attendance": await list_items("attendance", limit=300), "restaurant_id": current_rid.get(),
+             "incomes": await list_items("incomes", limit=300), "invoices": await db.invoices.find({}, {"_id": 0}).sort("date", -1).to_list(300), "settings": await app_settings()}
     return {**extra, "revenue": revenue, "expenses": spent, "profit": revenue - spent, "low_stock": low_stock, "staff_count": len(staff), "weekly": weekly, "sales": sales, "expenses_list": expenses, "inventory": inventory, "staff": staff, "cash": cash, "products": products, "suppliers": suppliers, "shifts": shifts, "leaves": leaves, "advances": advances, "leave_requests": leave_requests, "waste": waste}
 
 PERIOD = Query("daily", pattern="^(daily|weekly|monthly|custom)$")
@@ -340,6 +371,7 @@ async def build_report(period: str, start: str | None = None, end: str | None = 
     begin, finish = _range(period, start, end)
     since, until = begin.astimezone(timezone.utc).isoformat(), finish.astimezone(timezone.utc).isoformat()
     sales = await list_items("sales", since, None, until)
+    incomes = await list_items("incomes", since, None, until)
     expenses = await list_items("expenses", since, None, until)
     products = {}
     for item in sales:
@@ -350,9 +382,9 @@ async def build_report(period: str, start: str | None = None, end: str | None = 
         row["revenue"] += float(item.get("amount", 0))
         row["cost"] += quantity * float(item.get("unit_cost", 0))
         row["profit"] = row["revenue"] - row["cost"]
-    revenue, spent = _total(sales), _total(expenses)
+    revenue, spent = _total(sales) + _total(incomes), _total(expenses)
     waste = await db.waste.find({"created_at": {"$gte": since, "$lt": until}}, {"_id": 0}).to_list(None)
-    return {"payments": payment_breakdown(sales), "waste_cost": round(sum(float(w.get("cost", 0)) for w in waste), 2), "waste_count": len(waste), "period": period, "start": begin.isoformat(), "end": (finish - timedelta(seconds=1)).isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales),
+    return {"incomes_list": incomes, "incomes_total": _total(incomes), "product_sales_total": _total(sales), "payments": payment_breakdown(sales + incomes), "waste_cost": round(sum(float(w.get("cost", 0)) for w in waste), 2), "waste_count": len(waste), "period": period, "start": begin.isoformat(), "end": (finish - timedelta(seconds=1)).isoformat(), "revenue": revenue, "expenses": spent, "profit": revenue - spent, "sales_count": len(sales) + len(incomes),
             "top_products": sorted(products.values(), key=lambda row: row["quantity"], reverse=True), "sales": sales, "expenses_list": expenses}
 
 REC_KEYS = ("opening", "sales", "cash_sales", "expenses", "expected_closing", "actual_closing", "difference")
@@ -481,7 +513,7 @@ async def me(request: Request):
     member = await current_member(request)
     rid = member.get("restaurant_id") or DEFAULT_RESTAURANT
     return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"], "restaurants": RESTAURANTS,
-            "restaurant_id": rid, "restaurant_name": RESTAURANT_NAMES[rid], "staff_id": member.get("staff_id", "")}
+            "restaurant_id": rid, "restaurant_name": RESTAURANT_NAMES[rid], "staff_id": member.get("staff_id", ""), **(await app_settings())}
 
 @api.get("/users")
 async def list_users():
@@ -611,8 +643,8 @@ async def cash_reconciliation(date: str | None = None):
     since = datetime.combine(datetime.fromisoformat(target).date(), datetime.min.time(), TZ).astimezone(timezone.utc).isoformat()
     def same_day(item):
         return local_day(item["created_at"]) == target
-    sales = [item for item in await list_items("sales", since, None) if same_day(item)]
-    expenses = [item for item in await list_items("expenses", since, None) if same_day(item)]
+    sales = [item for item in await list_items("sales", since, None) + await list_items("incomes", since, None) if same_day(item)]
+    expenses = [item for item in await list_items("expenses", since, None) if same_day(item) and item.get("payment", "Nakit") == "Nakit"]
     cash_logs = [item for item in await list_items("cash", since, None) if same_day(item)]
     opening = float(cash_logs[-1].get("opening", 0)) if cash_logs else 0
     actual = float(cash_logs[0].get("closing", 0)) if cash_logs else 0
@@ -621,7 +653,7 @@ async def cash_reconciliation(date: str | None = None):
     expected = opening + payments["Nakit"] - expenses_total
     return {"date": target, "opening": opening, "sales": sales_total, "cash_sales": payments["Nakit"], "payments": payments, "expenses": expenses_total, "expected_closing": expected, "actual_closing": actual, "difference": actual - expected, "has_closing": bool(cash_logs)}
 
-PAYMENTS = ("Nakit", "Kart", "Yemek kartı")
+PAYMENTS = ("Nakit", "Kart", "Yemek kartı", "Havale")
 
 def payment_breakdown(sales: List[Dict[str, Any]]) -> Dict[str, float]:
     return {p: round(sum(float(x.get("amount", 0)) for x in sales if x.get("payment", "Nakit") == p), 2) for p in PAYMENTS}
@@ -804,15 +836,12 @@ class WizardIn(BaseModel):
     target_margin: float = Field(default=65, ge=0, lt=100)
     ingredients: List[WizardIngredient] = Field(min_length=1)
 
-@api.post("/products/wizard")
-async def product_wizard(body: WizardIn, request: Request):
-    """Create a product from guided answers; missing ingredients are opened in all restaurants at the given price."""
-    if any(_tr_key(p["name"]) == _tr_key(body.name) for p in await list_items("products", limit=None)):
-        raise HTTPException(status_code=409, detail=f"'{body.name}' adında bir menü ürünü zaten var")
+async def wizard_recipe(ingredients: List[WizardIngredient]) -> tuple[List[RecipeItem], List[str]]:
+    """Resolve answers to recipe rows; missing ingredients are opened in all restaurants at the given price."""
     inventory = await db.raw.inventory.find({}, {"_id": 0}).to_list(None)
     home = current_rid.get() if current_rid.get() in RESTAURANT_IDS else DEFAULT_RESTAURANT
     recipe, created = [], []
-    for ing in body.ingredients:
+    for ing in ingredients:
         key = _tr_key(ing.name)
         same = {i.get("restaurant_id"): i for i in inventory if _tr_key(i["name"]) == key}
         price = ing.unit_cost
@@ -821,16 +850,40 @@ async def product_wizard(body: WizardIn, request: Request):
         for rid in RESTAURANT_IDS:
             item = same.get(rid)
             if not item:
-                item = {**InventoryEntry(name=(next(iter(same.values()))["name"] if same else ing.name.strip()), unit=(next(iter(same.values()))["unit"] if same else ing.unit), unit_cost=price).model_dump(), "restaurant_id": rid}
+                base = next(iter(same.values()), None)
+                item = {**InventoryEntry(name=base["name"] if base else ing.name.strip(), unit=base["unit"] if base else ing.unit, unit_cost=price).model_dump(), "restaurant_id": rid}
                 await db.raw.inventory.insert_one({**item})
                 same[rid] = item
                 created.append(f"{item['name']} ({RESTAURANT_NAMES[rid]})")
             elif price and not float(item.get("unit_cost", 0)):
                 await db.raw.inventory.update_one({"id": item["id"]}, {"$set": {"unit_cost": price}})
         recipe.append(RecipeItem(inventory_id=same[home]["id"], amount=ing.amount))
+    return recipe, created
+
+@api.post("/products/wizard")
+async def product_wizard(body: WizardIn, request: Request):
+    if any(_tr_key(p["name"]) == _tr_key(body.name) for p in await list_items("products", limit=None)):
+        raise HTTPException(status_code=409, detail=f"'{body.name}' adında bir menü ürünü zaten var")
+    recipe, created = await wizard_recipe(body.ingredients)
     doc = await with_recipe_cost(ProductEntry(name=body.name.strip(), category=body.category.strip() or "Genel", price=body.price, target_margin=body.target_margin, recipe=recipe).model_dump())
     await db.products.insert_one({**doc})
     await audit(request, "Ekledi", "products", doc["id"], doc)
+    return {"product": ProductEntry(**doc).model_dump(), "created_ingredients": created}
+
+class WizardRecipeIn(BaseModel):
+    price: float = Field(ge=0)
+    target_margin: float = Field(default=65, ge=0, lt=100)
+    ingredients: List[WizardIngredient] = Field(min_length=1)
+
+@api.post("/products/{product_id}/wizard-recipe")
+async def product_wizard_recipe(product_id: str, body: WizardRecipeIn, request: Request):
+    old = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not old:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    recipe, created = await wizard_recipe(body.ingredients)
+    doc = await with_recipe_cost({**old, "price": body.price, "target_margin": body.target_margin, "recipe": [r.model_dump() for r in recipe]})
+    await db.products.replace_one({"id": product_id}, doc)
+    await audit(request, "Tarif ekledi", "products", product_id, doc)
     return {"product": ProductEntry(**doc).model_dump(), "created_ingredients": created}
 
 @api.post("/products/apply-suggested")
@@ -1520,6 +1573,110 @@ async def product_costs():
                "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"])}
     return {"restaurants": RESTAURANTS, "summary": summary, "products": rows}
 
+def created_for(day: str, fallback: str) -> str:
+    """Keep entries dated on the day the user picked so reports and the cash count see them on that day."""
+    if local_day(fallback) == day:
+        return fallback
+    return datetime.combine(date_cls.fromisoformat(day), datetime.min.time().replace(hour=12), TZ).astimezone(timezone.utc).isoformat()
+
+def invoice_note(inv: Dict[str, Any]) -> str:
+    return f"Fatura {inv.get('invoice_no') or ''} · {inv['supplier']}".replace("  ", " ")
+
+async def app_settings() -> Dict[str, Any]:
+    doc = await db.settings.find_one({"id": "app"}, {"_id": 0}) or {}
+    return {"product_sales": bool(doc.get("product_sales", False))}
+
+class SettingsIn(BaseModel):
+    product_sales: bool
+
+@api.get("/settings")
+async def get_settings():
+    return await app_settings()
+
+@api.put("/settings")
+async def put_settings(body: SettingsIn, request: Request):
+    await db.settings.update_one({"id": "app"}, {"$set": body.model_dump()}, upsert=True)
+    await audit(request, "Ayar değiştirdi", "settings", "app", detail=f"Ürün bazlı satış {'açık' if body.product_sales else 'kapalı'}")
+    return body.model_dump()
+
+class InvoicePayIn(BaseModel):
+    payment: str = Field(default="Havale", pattern="^(Nakit|Kart|Havale)$")
+    date: str = Field(default="", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    record_expense: bool = True
+
+async def _invoice(invoice_id: str) -> Dict[str, Any]:
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Fatura bulunamadı")
+    return inv
+
+@api.post("/invoices/{invoice_id}/pay")
+async def pay_invoice(invoice_id: str, body: InvoicePayIn, request: Request):
+    inv = await _invoice(invoice_id)
+    if inv["status"] == "Ödendi":
+        raise HTTPException(status_code=409, detail="Fatura zaten ödenmiş")
+    day = body.date or datetime.now(TZ).date().isoformat()
+    expense_id = ""
+    if body.record_expense:
+        exp = ExpenseEntry(category=inv.get("category") or "Fatura", amount=inv["amount"], supplier=inv["supplier"], note=invoice_note(inv), payment=body.payment, invoice_id=invoice_id).model_dump()
+        exp["created_at"] = created_for(day, exp["created_at"])
+        await db.expenses.insert_one({**exp, "restaurant_id": inv["restaurant_id"]})
+        expense_id = exp["id"]
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "Ödendi", "paid_at": day, "paid_payment": body.payment, "expense_id": expense_id}})
+    await audit(request, "Ödendi", "invoices", invoice_id, detail=f"{inv['supplier']} · {inv['amount']:g} ₺ · {body.payment}{' · gidere yazıldı' if expense_id else ''}")
+    return {**inv, "status": "Ödendi", "paid_at": day, "paid_payment": body.payment, "expense_id": expense_id}
+
+@api.post("/invoices/{invoice_id}/unpay")
+async def unpay_invoice(invoice_id: str, request: Request):
+    inv = await _invoice(invoice_id)
+    if inv.get("expense_id"):
+        await db.expenses.delete_many({"id": inv["expense_id"]})
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "Ödenmedi", "paid_at": "", "paid_payment": "", "expense_id": ""}})
+    await audit(request, "Ödeme geri alındı", "invoices", invoice_id, detail=f"{inv['supplier']} · {inv['amount']:g} ₺")
+    return {"ok": True}
+
+UPLOAD_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "heic": "image/heic", "heif": "image/heif", "pdf": "application/pdf"}
+MAX_UPLOAD = 10 * 1024 * 1024
+
+@api.post("/invoices/{invoice_id}/files")
+async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFile = File(...)):
+    inv = await _invoice(invoice_id)
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else ""
+    if ext not in UPLOAD_TYPES:
+        raise HTTPException(status_code=422, detail="Yalnızca fotoğraf (JPG, PNG, WEBP, HEIC) veya PDF yüklenebilir")
+    data = await file.read()
+    if not data or len(data) > MAX_UPLOAD:
+        raise HTTPException(status_code=422, detail="Dosya boş veya 10 MB'den büyük")
+    if len([f for f in inv.get("files", [])]) >= 10:
+        raise HTTPException(status_code=422, detail="Bir faturaya en fazla 10 dosya eklenebilir")
+    path = f"{APP_PREFIX}/invoices/{inv['restaurant_id']}/{uuid.uuid4()}.{ext}"
+    try:
+        result = await asyncio.to_thread(put_object, path, data, UPLOAD_TYPES[ext])
+    except Exception as exc:
+        logging.exception("invoice upload failed")
+        raise HTTPException(status_code=502, detail="Dosya depoya yüklenemedi, lütfen tekrar deneyin") from exc
+    meta = {"id": str(uuid.uuid4()), "filename": file.filename, "content_type": UPLOAD_TYPES[ext], "size": len(data), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.files.insert_one({**meta, "invoice_id": invoice_id, "restaurant_id": inv["restaurant_id"], "storage_path": result.get("path", path), "is_deleted": False})
+    await db.invoices.update_one({"id": invoice_id}, {"$push": {"files": meta}})
+    await audit(request, "Dosya ekledi", "invoices", invoice_id, detail=f"{inv['supplier']} · {file.filename}")
+    return meta
+
+@api.get("/files/{file_id}")
+async def download_file(file_id: str):
+    record = await db.files.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
+    if not record or not await db.invoices.find_one({"id": record["invoice_id"]}):
+        raise HTTPException(status_code=404, detail="Dosya bulunamadı")
+    data, _ = await asyncio.to_thread(get_object, record["storage_path"])
+    return Response(content=data, media_type=record["content_type"], headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(record['filename'])}"})
+
+@api.delete("/invoices/{invoice_id}/files/{file_id}")
+async def delete_invoice_file(invoice_id: str, file_id: str, request: Request):
+    inv = await _invoice(invoice_id)
+    await db.files.update_one({"id": file_id, "invoice_id": invoice_id}, {"$set": {"is_deleted": True}})
+    await db.invoices.update_one({"id": invoice_id}, {"$pull": {"files": {"id": file_id}}})
+    await audit(request, "Dosya sildi", "invoices", invoice_id, detail=inv["supplier"])
+    return {"ok": True}
+
 def make_crud(name: str, model: type[BaseModel]):
     @api.get(f"/{name}")
     async def get_items():
@@ -1531,6 +1688,10 @@ def make_crud(name: str, model: type[BaseModel]):
             specific_rid()
         if name == "attendance":
             await validate_attendance(doc)
+        if name == "incomes":
+            doc["created_at"] = created_for(doc["date"], doc["created_at"])
+        if name == "invoices":
+            doc.update(status="Ödenmedi", paid_at="", paid_payment="", expense_id="", files=[])
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "sales" and getattr(request.state, "member", {}).get("role") == "staff":
@@ -1561,6 +1722,14 @@ def make_crud(name: str, model: type[BaseModel]):
         doc = {**item.model_dump(), "id": item_id, "created_at": old["created_at"]}
         if name == "attendance":
             await validate_attendance(doc)
+        if name == "incomes":
+            doc["created_at"] = created_for(doc["date"], old["created_at"])
+        if name == "invoices":
+            doc.update({k: old.get(k, doc[k]) for k in ("status", "paid_at", "paid_payment", "expense_id", "files")})
+            if old.get("expense_id"):
+                await db.expenses.update_one({"id": old["expense_id"]}, {"$set": {"amount": doc["amount"], "supplier": doc["supplier"], "note": invoice_note(doc)}})
+        if name == "expenses":
+            doc["invoice_id"] = old.get("invoice_id", "")
         if name == "products":
             doc = await with_recipe_cost(doc)
         if name == "expenses" and (old.get("purchases") or doc.get("purchases")):
@@ -1608,6 +1777,12 @@ def make_crud(name: str, model: type[BaseModel]):
             await apply_moves(old.get("stock_moves", []), -1, old, "Satış silindi (stok iade)")
         if name == "expenses" and old.get("purchases"):
             await apply_purchases(old, -1, "Alış silindi (stoktan çıkarıldı)")
+        if name == "expenses" and old.get("invoice_id"):
+            await db.invoices.update_one({"id": old["invoice_id"]}, {"$set": {"status": "Ödenmedi", "paid_at": "", "paid_payment": "", "expense_id": ""}})
+        if name == "invoices" and old.get("expense_id"):
+            await db.expenses.delete_many({"id": old["expense_id"]})
+        if name == "invoices":
+            await db.files.update_many({"invoice_id": item_id}, {"$set": {"is_deleted": True}})
         if name == "waste":
             await apply_waste(old, -1, "Fire silindi (stok iade)")
         if name == "orders" and old.get("expense_id"):
@@ -1633,6 +1808,8 @@ app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.envi
 @app.on_event("startup")
 async def startup():
     await db.cron_runs.create_index("run_id", unique=True)
+    with suppress(Exception):
+        await asyncio.to_thread(init_storage)
     for name in SCOPED:
         await db.raw[name].update_many({"restaurant_id": {"$exists": False}}, {"$set": {"restaurant_id": DEFAULT_RESTAURANT}})
 

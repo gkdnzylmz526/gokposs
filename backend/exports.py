@@ -52,17 +52,19 @@ def _sections(report: dict) -> list:
     return _restaurant_section(report) + [
         ("Dönem Özeti", ["Kalem", "Tutar"], [
             ["Toplam ciro", report["revenue"]], ["Toplam gider", report["expenses"]],
-            ["Net kâr", report["profit"]], ["Satış adedi (işlem)", report["sales_count"]]]),
+            ["Net kâr", report["profit"]], ["Kayıt adedi (işlem)", report["sales_count"]]]),
         ("Kasa Mutabakatı (" + report["reconciliation"]["date"] + ")", ["Kalem", "Tutar"], [
-            ["Açılış kasası", rec["opening"]], ["+ Günlük satış", rec["sales"]], ["− Günlük gider", rec["expenses"]],
+            ["Açılış kasası", rec["opening"]], ["Günlük ciro (tümü)", rec["sales"]], ["+ Nakit gelir", rec["cash_sales"]], ["− Nakit gider", rec["expenses"]],
             ["Beklenen kapanış", rec["expected_closing"]], ["Gerçek kapanış", rec["actual_closing"]], ["Fark", rec["difference"]]]),
-        ("Ürün Performansı", ["Ürün", "Adet", "Ciro", "Maliyet", "Kâr"], [
+    ] + ([("Ürün Performansı", ["Ürün", "Adet", "Ciro", "Maliyet", "Kâr"], [
             [p["product_name"], p["quantity"], p["revenue"], p["cost"], p["profit"]] for p in report["top_products"]]),
         ("Satış Kayıtları", ["Tarih", "Ürün", "Kanal", "Adet", "Birim fiyat", "Tutar"], [
             [_local(s.get("created_at")), s.get("product_name") or s.get("note") or "-", s.get("channel", ""),
-             s.get("quantity", 1), s.get("unit_price", 0), s.get("amount", 0)] for s in report["sales"]]),
-        ("Gider Kayıtları", ["Tarih", "Kategori", "Açıklama", "Tutar"], [
-            [_local(e.get("created_at")), e.get("category", ""), e.get("note", ""), e.get("amount", 0)] for e in report["expenses_list"]]),
+             s.get("quantity", 1), s.get("unit_price", 0), s.get("amount", 0)] for s in report["sales"]])] if report["sales"] else []) + [
+        ("Gelir Kayıtları", ["Tarih", "Gelir türü", "Ödeme", "Açıklama", "Tutar"], [
+            [i.get("date", ""), i.get("category", ""), i.get("payment", ""), i.get("note", ""), i.get("amount", 0)] for i in report.get("incomes_list", [])]),
+        ("Gider Kayıtları", ["Tarih", "Kategori", "Ödeme", "Açıklama", "Tutar"], [
+            [_local(e.get("created_at")), e.get("category", ""), e.get("payment", "Nakit"), e.get("note", "") or e.get("supplier", ""), e.get("amount", 0)] for e in report["expenses_list"]]),
     ] + ([("Kritik Stok", ["Malzeme", "Mevcut", "Minimum", "Birim"], [
         [i["name"], i.get("quantity", 0), i.get("minimum", 0), i.get("unit", "")] for i in report["low_stock"]])] if "low_stock" in report else [])
 

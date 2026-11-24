@@ -27,14 +27,14 @@ function Recap({ lines, onRemove }) {
   );
 }
 
-export const ProductWizard = ({ inventory, categories, onClose, onSaved }) => {
+export const ProductWizard = ({ inventory, categories, product: existing, onClose, onSaved }) => {
   const known = useMemo(() => { const by = {}; inventory.forEach((i) => { const k = key(i.name); by[k] = by[k] || { name: i.name, unit: i.unit, prices: [] }; if (i.unit_cost > 0) by[k].prices.push(i.unit_cost); }); return Object.fromEntries(Object.entries(by).map(([k, v]) => [k, { ...v, unit_cost: v.prices.length ? v.prices.reduce((a, b) => a + b, 0) / v.prices.length : 0 }])); }, [inventory]);
-  const [step, setStep] = useState("name");
+  const [step, setStep] = useState(existing ? "ingredient" : "name");
   const [history, setHistory] = useState([]);
-  const [product, setProduct] = useState({ name: "", category: categories[0] || "Genel" });
+  const [product, setProduct] = useState({ name: existing?.name || "", category: existing?.category || categories[0] || "Genel" });
   const [draft, setDraft] = useState({ name: "", unit: "kg", unit_cost: "", amount: "", useSub: true });
   const [lines, setLines] = useState([]);
-  const [margin, setMargin] = useState(65);
+  const [margin, setMargin] = useState(Number(existing?.target_margin) || 65);
   const [price, setPrice] = useState("");
   const [saving, setSaving] = useState(false);
   const go = (next) => { setHistory([...history, step]); setStep(next); };
@@ -59,8 +59,11 @@ export const ProductWizard = ({ inventory, categories, onClose, onSaved }) => {
   const save = async () => {
     setSaving(true);
     try {
-      const { data } = await axios.post(`${API}/products/wizard`, { name: product.name, category: product.category, price: num(price), target_margin: margin, ingredients: lines.map((l) => ({ name: l.name, unit: l.unit, amount: l.amount, ...(l.priced && { unit_cost: l.unit_cost }) })) });
-      toast.success(`${data.product.name} menüye eklendi · maliyet ${money(data.product.cost)}${data.created_ingredients.length ? ` · ${data.created_ingredients.length} yeni stok kalemi açıldı` : ""}`);
+      const ingredients = lines.map((l) => ({ name: l.name, unit: l.unit, amount: l.amount, ...(l.priced && { unit_cost: l.unit_cost }) }));
+      const { data } = existing
+        ? await axios.post(`${API}/products/${existing.id}/wizard-recipe`, { price: num(price), target_margin: margin, ingredients })
+        : await axios.post(`${API}/products/wizard`, { name: product.name, category: product.category, price: num(price), target_margin: margin, ingredients: lines.map((l) => ({ name: l.name, unit: l.unit, amount: l.amount, ...(l.priced && { unit_cost: l.unit_cost }) })) });
+      toast.success(`${data.product.name} ${existing ? "tarifi kaydedildi" : "menüye eklendi"} · maliyet ${money(data.product.cost)}${data.created_ingredients.length ? ` · ${data.created_ingredients.length} yeni stok kalemi açıldı` : ""}`);
       onSaved(); onClose();
     } catch (e) { toast.error(errorText(e, "Ürün kaydedilemedi")); } finally { setSaving(false); }
   };
@@ -100,9 +103,9 @@ export const ProductWizard = ({ inventory, categories, onClose, onSaved }) => {
       <div className="wiz-chips">{[50, 60, 65, 70, 75].map((m) => <button key={m} className={margin === m ? "active" : ""} data-testid={`wizard-margin-${m}`} onClick={() => setMargin(m)}>%{m}</button>)}</div>
       <label className="wiz-inline">%<input type="number" min="0" max="95" value={margin} data-testid="wizard-margin-input" onChange={(e) => setMargin(Math.min(95, Number(e.target.value)))} /></label>
       <p className="wiz-suggest">Önerilen satış fiyatı <strong data-testid="wizard-suggested">{money(suggested)}</strong></p>
-      <button className="primary-button" data-testid="wizard-next" onClick={() => { setPrice(String(suggested)); go("price_sale"); }}>Devam</button>
+      <button className="primary-button" data-testid="wizard-next" onClick={() => { setPrice(String(existing?.price > 0 ? existing.price : suggested)); go("price_sale"); }}>Devam</button>
     </Question>,
-    price_sale: <Question title={`${product.name} kaç TL'ye satılsın?`} hint={`Önerilen: ${money(suggested)}. İsterseniz değiştirin.`}>
+    price_sale: <Question title={`${product.name} kaç TL'ye satılsın?`} hint={existing?.price > 0 ? `Şu anki fiyat ${money(existing.price)} · önerilen ${money(suggested)}` : `Önerilen: ${money(suggested)}. İsterseniz değiştirin.`}>
       <label className="wiz-inline"><input autoFocus type="number" min="0" step="any" value={price} data-testid="wizard-price-input" onChange={(e) => setPrice(e.target.value)} onKeyDown={enter(() => go("summary"), num(price) > 0)} />TL</label>
       {num(price) > 0 && <small className={(num(price) - cost) / num(price) * 100 < margin ? "danger-inline" : "green-text"} data-testid="wizard-price-margin">Bu fiyatla kâr marjı %{((num(price) - cost) / num(price) * 100).toFixed(1).replace(".", ",")} · porsiyon kârı {money(num(price) - cost)}</small>}
       <button className="primary-button" disabled={!(num(price) > 0)} data-testid="wizard-next" onClick={() => go("summary")}>Özeti gör</button>
@@ -116,14 +119,14 @@ export const ProductWizard = ({ inventory, categories, onClose, onSaved }) => {
         <div><span>Gıda maliyeti</span><b>%{num(price) ? (cost / num(price) * 100).toFixed(1).replace(".", ",") : 0}</b></div>
         {lines.some((l) => l.isNew) && <p className="muted">Yeni malzemeler ({lines.filter((l) => l.isNew).map((l) => l.name).join(", ")}) üç restoranın stoğuna 0 miktarla ve girdiğiniz fiyatla açılacak.</p>}
       </div>
-      <button className="primary-button" disabled={saving} data-testid="wizard-save" onClick={save}>{saving ? "Kaydediliyor…" : "Menüye kaydet"}</button>
+      <button className="primary-button" disabled={saving} data-testid="wizard-save" onClick={save}>{saving ? "Kaydediliyor…" : existing ? "Tarifi kaydet" : "Menüye kaydet"}</button>
     </Question>,
   };
   return (
     <div className="modal-backdrop">
       <div className="modal wizard-modal" data-testid="product-wizard">
         <button className="icon-button close" data-testid="wizard-close" onClick={onClose}><X size={18} /></button>
-        <span className="eyebrow"><Sparkles size={12} /> SORULARLA ÜRÜN EKLE</span>
+        <span className="eyebrow"><Sparkles size={12} /> {existing ? `${existing.name.toLocaleUpperCase("tr-TR")} · SORULARLA TARİF` : "SORULARLA ÜRÜN EKLE"}</span>
         <div className="wiz-body">
           <div className="wiz-main" key={step}>{steps[step]}{history.length > 0 && <button className="text-button wiz-back" data-testid="wizard-back" onClick={back}><ArrowLeft size={13} /> Geri</button>}</div>
           <Recap lines={lines} onRemove={(i) => setLines(lines.filter((_, idx) => idx !== i))} />

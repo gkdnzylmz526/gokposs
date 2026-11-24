@@ -9,7 +9,18 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const roleLabel = { admin: "Yönetici (her şey)", staff: "Personel (masa, satış, stok, giriş-çıkış)", member: "Erişimi yok" };
 const grid = { gridTemplateColumns: "1.8fr .8fr 1.2fr 1.2fr 1.2fr" };
 
-export const UsersView = () => {
+function SettingsCard({ settings, onChange }) {
+  const on = Boolean(settings?.product_sales);
+  const toggle = async () => { try { await axios.put(`${API}/settings`, { product_sales: !on }); toast.success(!on ? "Ürün bazlı satış açıldı" : "Ürün bazlı satış gizlendi"); onChange(); } catch (e) { toast.error(errorText(e, "Ayar kaydedilemedi")); } };
+  return (
+    <section className="panel settings-card" data-testid="settings-card">
+      <div><h3>Ürün bazlı satış (Satışlar, Masalar, Mutfak)</h3><span className="muted">{on ? "Açık: satışlar ürün ürün girilir, stoktan otomatik düşer." : "Kapalı: ciroyu Kasa bölümünden manuel gelir olarak girersiniz. Maliyet ve stok sayfaları çalışmaya devam eder."}</span></div>
+      <button className={`switch ${on ? "on" : ""}`} role="switch" aria-checked={on} data-testid="setting-product-sales" onClick={toggle}><i /></button>
+    </section>
+  );
+}
+
+export const UsersView = ({ settings, onSettingsChange }) => {
   const { user } = useUser();
   const [data, setData] = useState({ roles: [], users: [] });
   const [staff, setStaff] = useState([]);
@@ -28,6 +39,7 @@ export const UsersView = () => {
   return (
     <>
       <div className="welcome-row"><div><p className="eyebrow">AYARLAR</p><h2>Kullanıcılar</h2><p className="muted">Panele yalnızca "Yönetici" yetkisi olanlar girebilir. "Personel" yetkisi yalnızca bağlı olduğu restoranın masalarını, satış girişini, stok sayımını ve kendi giriş-çıkışını görür. Giriş-çıkış için personel hesabını bir personel kaydına bağlayın.</p></div></div>
+      <SettingsCard settings={settings} onChange={onSettingsChange} />
       <section className="panel table-panel" data-testid="users-panel">
         <div className="spending-scroll">
           <div className="table-head" style={grid}><span>E-posta</span><span>Kayıt</span><span>Yetki</span><span>Restoran</span><span>Personel kaydı</span></div>

@@ -8,7 +8,7 @@ RESTAURANT_IDS = {r["id"] for r in RESTAURANTS}
 RESTAURANT_NAMES = {r["id"]: r["name"] for r in RESTAURANTS}
 DEFAULT_RESTAURANT = RESTAURANTS[0]["id"]
 SCOPED = {"sales", "expenses", "inventory", "staff", "cash", "shifts", "leaves", "advances", "orders", "waste", "stock_movements", "price_alerts",
-          "leave_requests", "tables", "table_orders", "tips", "attendance", "kitchen_tickets"}
+          "leave_requests", "tables", "table_orders", "tips", "attendance", "kitchen_tickets", "incomes", "invoices"}
 current_rid: ContextVar[str | None] = ContextVar("restaurant_id", default=None)
 
 
