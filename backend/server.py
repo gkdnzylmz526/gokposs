@@ -80,7 +80,7 @@ async def current_member(request: Request) -> Dict[str, Any]:
 STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
-ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings)(/.*)?|/api/staff/[\w-]+/request-link"
+ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -1536,6 +1536,50 @@ async def restaurants_summary():
                      "month_revenue": month["revenue"], "month_profit": month["profit"], "low_stock": low, "open_tables": open_tables})
     return rows
 
+DEFAULT_OVERHEAD = ["Kira", "Elektrik", "Su", "Doğalgaz", "İnternet / telefon", "Personel maaşları", "SGK / vergi", "Muhasebe", "Diğer"]
+
+class OverheadItem(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    amount: float = Field(default=0, ge=0)
+
+class OverheadIn(BaseModel):
+    items: List[OverheadItem] = Field(max_length=30)
+    monthly_revenue: float = Field(default=0, ge=0)
+
+async def overhead_info() -> Dict[str, Any]:
+    """Monthly fixed costs of all restaurants as a share of monthly revenue (one ratio for all)."""
+    doc = await db.settings.find_one({"id": "overhead"}, {"_id": 0}) or {}
+    items = doc.get("items") or [{"name": n, "amount": 0} for n in DEFAULT_OVERHEAD]
+    since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    auto = 0.0
+    for col in ("sales", "incomes"):
+        auto += sum(float(r.get("amount", 0)) for r in await db.raw[col].find({"created_at": {"$gte": since}}, {"_id": 0, "amount": 1}).to_list(None))
+    manual = float(doc.get("monthly_revenue") or 0)
+    revenue = manual or auto
+    total = round(sum(float(i["amount"]) for i in items), 2)
+    ratio = round(total / revenue * 100, 2) if revenue else 0
+    return {"items": items, "total": total, "revenue_auto": round(auto, 2), "revenue_manual": manual, "revenue_used": round(revenue, 2),
+            "revenue_source": "manual" if manual else "auto", "ratio_pct": ratio}
+
+@api.get("/overhead")
+async def get_overhead():
+    return await overhead_info()
+
+@api.put("/overhead")
+async def put_overhead(body: OverheadIn, request: Request):
+    await db.settings.update_one({"id": "overhead"}, {"$set": {"items": [i.model_dump() for i in body.items if i.name.strip()], "monthly_revenue": body.monthly_revenue}}, upsert=True)
+    info = await overhead_info()
+    await audit(request, "Sabit gider güncelledi", "settings", "overhead", detail=f"Aylık {info['total']:g} ₺ · oran %{info['ratio_pct']:g}")
+    return info
+
+def with_overhead(row: Dict[str, Any], ratio_pct: float) -> Dict[str, Any]:
+    price, cost, r = row["price"], row["cost"], ratio_pct / 100
+    share = round(price * r, 2)
+    full = round(cost + share, 2)
+    room = 1 - row["target_margin"] / 100 - r
+    return {**row, "overhead_cost": share, "full_cost": full, "net_profit": round(price - full, 2), "net_margin": _margin(price, full) if price else None,
+            "suggested_with_overhead": math.ceil(cost / room) if cost > 0 and room > 0.01 else None}
+
 @api.get("/product-costs")
 async def product_costs():
     inventory = await db.raw.inventory.find({}, {"_id": 0}).to_list(None)
@@ -1569,9 +1613,12 @@ async def product_costs():
                      "profit": round(price - cost, 2), "margin": _margin(price, cost), "food_cost_pct": round(cost / price * 100, 1) if price else None,
                      "target_margin": float(p.get("target_margin") or 0) or 65, "suggested_price": suggested_price(p), "lines": lines, "per_restaurant": per})
     with_recipe = [r for r in rows if r["has_recipe"] and r["price"]]
+    overhead = await overhead_info()
+    rows = [with_overhead(r, overhead["ratio_pct"]) for r in rows]
+    with_recipe = [r for r in rows if r["has_recipe"] and r["price"]]
     summary = {"products": len(rows), "with_recipe": len(with_recipe), "avg_food_cost_pct": round(sum(r["food_cost_pct"] for r in with_recipe) / len(with_recipe), 1) if with_recipe else None,
-               "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"])}
-    return {"restaurants": RESTAURANTS, "summary": summary, "products": rows}
+               "below_target": sum(1 for r in with_recipe if r["margin"] < r["target_margin"]), "losing": sum(1 for r in with_recipe if r["net_profit"] < 0)}
+    return {"restaurants": RESTAURANTS, "summary": summary, "overhead": overhead, "products": rows}
 
 def created_for(day: str, fallback: str) -> str:
     """Keep entries dated on the day the user picked so reports and the cash count see them on that day."""
