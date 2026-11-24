@@ -791,6 +791,48 @@ def suggested_price(product: Dict[str, Any]) -> float | None:
     cost = float(product.get("cost", 0))
     return math.ceil(cost / (1 - margin / 100)) if cost > 0 and margin < 100 else None
 
+class WizardIngredient(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    unit: str = Field(default="adet", min_length=1, max_length=20)
+    unit_cost: float | None = Field(default=None, ge=0)
+    amount: float = Field(gt=0)
+
+class WizardIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    category: str = Field(default="Genel", max_length=40)
+    price: float = Field(ge=0)
+    target_margin: float = Field(default=65, ge=0, lt=100)
+    ingredients: List[WizardIngredient] = Field(min_length=1)
+
+@api.post("/products/wizard")
+async def product_wizard(body: WizardIn, request: Request):
+    """Create a product from guided answers; missing ingredients are opened in all restaurants at the given price."""
+    if any(_tr_key(p["name"]) == _tr_key(body.name) for p in await list_items("products", limit=None)):
+        raise HTTPException(status_code=409, detail=f"'{body.name}' adında bir menü ürünü zaten var")
+    inventory = await db.raw.inventory.find({}, {"_id": 0}).to_list(None)
+    home = current_rid.get() if current_rid.get() in RESTAURANT_IDS else DEFAULT_RESTAURANT
+    recipe, created = [], []
+    for ing in body.ingredients:
+        key = _tr_key(ing.name)
+        same = {i.get("restaurant_id"): i for i in inventory if _tr_key(i["name"]) == key}
+        price = ing.unit_cost
+        if price is None:
+            price = next((float(i.get("unit_cost", 0)) for i in same.values() if float(i.get("unit_cost", 0)) > 0), 0)
+        for rid in RESTAURANT_IDS:
+            item = same.get(rid)
+            if not item:
+                item = {**InventoryEntry(name=ing.name.strip(), unit=(next(iter(same.values()))["unit"] if same else ing.unit), unit_cost=price).model_dump(), "restaurant_id": rid}
+                await db.raw.inventory.insert_one({**item})
+                same[rid] = item
+                created.append(f"{item['name']} ({RESTAURANT_NAMES[rid]})")
+            elif price and not float(item.get("unit_cost", 0)):
+                await db.raw.inventory.update_one({"id": item["id"]}, {"$set": {"unit_cost": price}})
+        recipe.append(RecipeItem(inventory_id=same[home]["id"], amount=ing.amount))
+    doc = await with_recipe_cost(ProductEntry(name=body.name.strip(), category=body.category.strip() or "Genel", price=body.price, target_margin=body.target_margin, recipe=recipe).model_dump())
+    await db.products.insert_one({**doc})
+    await audit(request, "Ekledi", "products", doc["id"], doc)
+    return {"product": ProductEntry(**doc).model_dump(), "created_ingredients": created}
+
 @api.post("/products/apply-suggested")
 async def apply_suggested_prices(payload: Dict[str, List[str]], request: Request):
     ids = set(payload.get("product_ids", []))
