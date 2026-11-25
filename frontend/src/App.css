@@ -247,3 +247,27 @@
 .rest-row .text-button, .rest-archive-toggle { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .rest-archive-toggle { margin-top: 12px; }
 .restaurant-card.locked strong { display: flex; align-items: center; gap: 8px; color: #8a8378; }
+.pin-gate.with-cover { padding-top: 0; overflow: hidden; }
+.pin-cover { width: calc(100% + 60px); margin: 0 -30px; height: 150px; object-fit: cover; }
+.pin-logo { width: 76px; height: 76px; border-radius: 20px; object-fit: contain; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.pin-gate.with-cover .pin-logo { margin-top: -50px; }
+.rest-logo-thumb { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid #eee; }
+.rest-images { grid-column: 1 / -1; display: flex; gap: 18px; flex-wrap: wrap; }
+.rest-image { display: grid; gap: 6px; font-size: 12px; font-weight: 600; justify-items: start; }
+.rest-image-box { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px dashed #d8d1c5; border-radius: 12px; background: #fff; color: #8a8378; cursor: pointer; overflow: hidden; transition: border-color .2s; }
+.rest-image-box:hover { border-color: #e0a23a; }
+.rest-image-logo .rest-image-box { width: 96px; height: 96px; }
+.rest-image-cover .rest-image-box { width: 260px; height: 96px; }
+.rest-image-box img { width: 100%; height: 100%; object-fit: cover; }
+.rest-image-logo .rest-image-box img { object-fit: contain; }
+.pin-request { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 12px; align-items: center; padding: 12px 14px; margin-bottom: 10px; border-radius: 12px; background: #fbf1df; color: #7a5310; }
+.pin-request small { display: block; color: #8a8378; font-size: 12px; }
+.pin-request button { display: inline-flex; align-items: center; gap: 5px; }
+.rest-hero { position: relative; height: 200px; border-radius: 22px; overflow: hidden; margin-bottom: 22px; background: #1d2533; animation: pinIn .4s ease-out; }
+.rest-hero.no-cover { height: 120px; }
+.rest-hero-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.rest-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(15,20,30,.78), rgba(15,20,30,.1)); }
+.rest-hero-body { position: absolute; z-index: 1; left: 28px; bottom: 24px; display: flex; align-items: center; gap: 16px; color: #fff; }
+.rest-hero-body h2 { margin: 0; font-size: 30px; color: #fff; }
+.rest-hero-logo { width: 72px; height: 72px; border-radius: 18px; object-fit: contain; background: #fff; padding: 4px; }
+.brand-logo { width: 40px; height: 40px; border-radius: 12px; object-fit: contain; background: #fff; }

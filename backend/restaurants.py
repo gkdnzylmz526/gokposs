@@ -21,7 +21,7 @@ def refresh(docs: List[Dict[str, Any]]) -> None:
     DOCS.clear()
     DOCS.update({d["id"]: d for d in docs})
     active = [d for d in docs if not d.get("archived")]
-    RESTAURANTS[:] = [{"id": d["id"], "name": d["name"], "has_pin": bool(d.get("pin_hash"))} for d in active]
+    RESTAURANTS[:] = [{"id": d["id"], "name": d["name"], "has_pin": bool(d.get("pin_hash")), "logo_id": d.get("logo_id", ""), "cover_id": d.get("cover_id", "")} for d in active]
     RESTAURANT_IDS.clear()
     RESTAURANT_IDS.update(d["id"] for d in active)
     RESTAURANT_NAMES.clear()

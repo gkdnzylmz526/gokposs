@@ -21,7 +21,7 @@ from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
 from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
-from mailer import send_cash_reminder_email, send_leave_request_email, send_monthly_email, send_report_email, send_weekly_email
+from mailer import send_cash_reminder_email, send_leave_request_email, send_monthly_email, send_pin_request_email, send_report_email, send_restaurant_daily_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -88,8 +88,8 @@ STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
 ADMIN_ONLY = r"/api/(users|settings|audit-logs|email|restaurants/manage)(/.*)?"
-PIN_FREE = r"/api/(restaurants/(unlock|manage(/.*)?)|users(/.*)?|audit-logs|settings(/.*)?)"
-ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
+PIN_FREE = r"/api/(restaurants/(unlock|pin-request|manage(/.*)?)|users(/.*)?|audit-logs|settings(/.*)?)"
+ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/pin-request|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -469,6 +469,13 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
             current_rid.reset(token)
         report["low_stock"] = [{**i, "name": f"{i['name']} ({r['name']})"} for r in report["restaurants"] for i in r["low_stock"]]
         await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
+        for r in report["restaurants"]:
+            to = (rest.DOCS.get(r["id"], {}).get("email") or "").strip()
+            if to:
+                try:
+                    await asyncio.to_thread(send_restaurant_daily_email, r, day, to)
+                except Exception:
+                    logging.exception("restaurant daily email failed for %s", r["id"])
     return await _deliver("daily", trigger, key, job)
 
 async def send_weekly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
@@ -1598,7 +1605,8 @@ class UnlockIn(BaseModel):
     pins: Dict[str, str]
 
 def _public_restaurant(d: Dict[str, Any]) -> Dict[str, Any]:
-    return {"id": d["id"], "name": d["name"], "email": d.get("email", ""), "has_pin": bool(d.get("pin_hash")), "archived": bool(d.get("archived")), "created_at": d.get("created_at", "")}
+    return {"id": d["id"], "name": d["name"], "email": d.get("email", ""), "has_pin": bool(d.get("pin_hash")), "archived": bool(d.get("archived")), "created_at": d.get("created_at", ""),
+            "logo_id": d.get("logo_id", ""), "cover_id": d.get("cover_id", "")}
 
 async def _check_email(email: str, rid: str | None) -> str:
     email = email.strip().lower()
@@ -1671,6 +1679,86 @@ async def restore_restaurant(rid: str, request: Request):
     await db.raw.restaurants.update_one({"id": rid}, {"$set": {"archived": False}})
     await audit(request, "Restoranı geri aldı", "restaurants", rid, detail=RESTAURANT_NAMES[rid])
     return {"id": rid, "archived": False}
+
+class PinRequestIn(BaseModel):
+    restaurant_id: str
+    new_pin: str = Field(max_length=6)
+
+@api.post("/restaurants/pin-request")
+async def request_pin(body: PinRequestIn, request: Request, background: BackgroundTasks):
+    member = request.state.member
+    doc = rest.DOCS.get(body.restaurant_id)
+    if not doc or doc.get("archived") or (member["role"] == "manager" and body.restaurant_id != member.get("restaurant_id")):
+        raise HTTPException(status_code=403, detail="Bu restorana erişiminiz yok")
+    if not re.fullmatch(PIN_RE, body.new_pin):
+        raise HTTPException(status_code=422, detail="Şifre 4-6 haneli rakam olmalı")
+    await db.raw.pin_requests.update_many({"restaurant_id": body.restaurant_id, "status": "pending"}, {"$set": {"status": "replaced"}})
+    req = {"id": str(uuid.uuid4()), "restaurant_id": body.restaurant_id, "user_email": member.get("email", ""), "pin_hash": rest.hash_pin(body.new_pin), "status": "pending", "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.raw.pin_requests.insert_one({**req})
+    await audit(request, "Şifre talep etti", "restaurants", body.restaurant_id, detail=doc["name"])
+    if member["role"] != "admin":
+        background.add_task(_notify_pin_request, doc["name"], req["user_email"])
+    return {"ok": True}
+
+def _notify_pin_request(name: str, email: str) -> None:
+    try:
+        send_pin_request_email(name, email)
+    except Exception:
+        logging.exception("pin request email failed")
+
+@api.get("/restaurants/manage/pin-requests")
+async def list_pin_requests():
+    rows = await db.raw.pin_requests.find({"status": "pending"}, {"_id": 0, "pin_hash": 0}).sort("created_at", -1).to_list(50)
+    return [{**r, "restaurant_name": RESTAURANT_NAMES.get(r["restaurant_id"], "")} for r in rows]
+
+@api.post("/restaurants/manage/pin-requests/{req_id}/{decision}")
+async def decide_pin_request(req_id: str, decision: str, request: Request):
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=404, detail="Not found")
+    req = await db.raw.pin_requests.find_one({"id": req_id, "status": "pending"}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Talep bulunamadı")
+    if decision == "approve":
+        await db.raw.restaurants.update_one({"id": req["restaurant_id"]}, {"$set": {"pin_hash": req["pin_hash"]}})
+    await db.raw.pin_requests.update_one({"id": req_id}, {"$set": {"status": "approved" if decision == "approve" else "rejected", "decided_at": datetime.now(timezone.utc).isoformat()}})
+    await audit(request, "Şifre talebini onayladı" if decision == "approve" else "Şifre talebini reddetti", "restaurants", req["restaurant_id"], detail=f"{RESTAURANT_NAMES.get(req['restaurant_id'], '')} · {req['user_email']}")
+    return {"ok": True}
+
+@api.post("/restaurants/manage/{rid}/image/{kind}")
+async def upload_restaurant_image(rid: str, kind: str, request: Request, file: UploadFile = File(...)):
+    if kind not in ("logo", "cover") or rid not in rest.DOCS:
+        raise HTTPException(status_code=404, detail="Restoran bulunamadı")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else ""
+    if ext not in PHOTO_TYPES:
+        raise HTTPException(status_code=422, detail="Yalnızca JPG, PNG veya WEBP fotoğraf yüklenebilir")
+    data = await file.read()
+    if not data or len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Fotoğraf boş veya 5 MB'den büyük")
+    path = f"{APP_PREFIX}/restaurants/{rid}/{kind}-{uuid.uuid4()}.{ext}"
+    try:
+        result = await asyncio.to_thread(put_object, path, data, PHOTO_TYPES[ext])
+    except Exception as exc:
+        logging.exception("restaurant image upload failed")
+        raise HTTPException(status_code=502, detail="Fotoğraf yüklenemedi, lütfen tekrar deneyin") from exc
+    fid = str(uuid.uuid4())
+    await db.files.insert_one({"id": fid, "kind": "restaurant_image", "restaurant_id": rid, "filename": file.filename, "content_type": PHOTO_TYPES[ext], "size": len(data),
+                               "storage_path": result.get("path", path), "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat()})
+    old = rest.DOCS[rid].get(f"{kind}_id")
+    if old:
+        await db.files.update_one({"id": old}, {"$set": {"is_deleted": True}})
+    await db.raw.restaurants.update_one({"id": rid}, {"$set": {f"{kind}_id": fid}})
+    await audit(request, "Logo yükledi" if kind == "logo" else "Kapak fotoğrafı yükledi", "restaurants", rid, detail=rest.DOCS[rid]["name"])
+    return {"id": fid}
+
+@api.delete("/restaurants/manage/{rid}/image/{kind}")
+async def delete_restaurant_image(rid: str, kind: str):
+    if kind not in ("logo", "cover") or rid not in rest.DOCS:
+        raise HTTPException(status_code=404, detail="Restoran bulunamadı")
+    old = rest.DOCS[rid].get(f"{kind}_id")
+    if old:
+        await db.files.update_one({"id": old}, {"$set": {"is_deleted": True}})
+    await db.raw.restaurants.update_one({"id": rid}, {"$set": {f"{kind}_id": ""}})
+    return {"ok": True}
 
 @api.post("/restaurants/unlock")
 async def unlock_restaurants(body: UnlockIn, request: Request):
@@ -1900,7 +1988,7 @@ async def delete_product_photo(product_id: str, request: Request):
 
 @api.get("/public/photos/{file_id}")
 async def public_photo(file_id: str):
-    record = await db.files.find_one({"id": file_id, "kind": "product_photo", "is_deleted": False}, {"_id": 0})
+    record = await db.files.find_one({"id": file_id, "kind": {"$in": ["product_photo", "restaurant_image"]}, "is_deleted": False}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı")
     try:

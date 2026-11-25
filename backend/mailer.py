@@ -19,8 +19,8 @@ def low_stock_text(items: list) -> str:
     return "KRİTİK STOK — minimum seviyenin altına düşen malzemeler:\n" + "\n".join(lines)
 
 
-def _send(subject: str, body: str, attachment: tuple[bytes, str] | None = None) -> None:
-    sender, password, recipient = os.environ["GMAIL_USERNAME"], os.environ["GMAIL_APP_PASSWORD"], os.environ["REPORT_RECIPIENT"]
+def _send(subject: str, body: str, attachment: tuple[bytes, str] | None = None, to: str | None = None) -> None:
+    sender, password, recipient = os.environ["GMAIL_USERNAME"], os.environ["GMAIL_APP_PASSWORD"], to or os.environ["REPORT_RECIPIENT"]
     msg = EmailMessage()
     msg["From"] = f"GÖKBOSS POS <{sender}>"
     msg["To"] = recipient
@@ -108,3 +108,11 @@ def send_cash_reminder_email(rec: dict) -> None:
         f"Bugünkü gider: {tl(rec['expenses'])}\nBeklenen kasa (nakit): {tl(rec['expected_closing'])}\n\n"
         "Lütfen GÖKBOSS POS > Kasa bölümünden açılış ve kapanış tutarlarını girin.\n\nGÖKBOSS POS",
     )
+
+
+def send_restaurant_daily_email(r: dict, day: str, to: str) -> None:
+    _send(f"{r['name']} — Gün sonu özeti {day}", f"Merhaba,\n\n{day} tarihli {r['name']} gün sonu özetiniz:\n\n{restaurant_text(r)}\n\nGÖKBOSS POS", to=to)
+
+
+def send_pin_request_email(restaurant: str, email: str) -> None:
+    _send(f"{restaurant} — şifre sıfırlama talebi", f"Merhaba,\n\n{email} hesabı {restaurant} için yeni şifre talep etti.\nOnaylamak için panelde Kullanıcılar > Restoranlar bölümüne gidin.\n\nGÖKBOSS POS")
