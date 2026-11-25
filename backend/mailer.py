@@ -116,3 +116,9 @@ def send_restaurant_daily_email(r: dict, day: str, to: str) -> None:
 
 def send_pin_request_email(restaurant: str, email: str) -> None:
     _send(f"{restaurant} — şifre sıfırlama talebi", f"Merhaba,\n\n{email} hesabı {restaurant} için yeni şifre talep etti.\nOnaylamak için panelde Kullanıcılar > Restoranlar bölümüne gidin.\n\nGÖKBOSS POS")
+
+
+def send_missing_revenue_email(name: str, day: str, to: str | None) -> None:
+    _send(f"{name} — bugünün cirosu girilmedi ({day})",
+          f"Merhaba,\n\n{name} için {day} tarihli ciro henüz girilmedi.\n\n"
+          "Lütfen GÖKBOSS POS > Ciro Girişi bölümünden POS'unuzdaki gün sonu tutarlarını girin.\n\nGÖKBOSS POS", to=to)

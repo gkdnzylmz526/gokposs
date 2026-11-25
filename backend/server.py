@@ -21,7 +21,7 @@ from pymongo.errors import DuplicateKeyError
 from fastapi.responses import Response
 
 from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
-from mailer import send_cash_reminder_email, send_leave_request_email, send_monthly_email, send_pin_request_email, send_report_email, send_restaurant_daily_email, send_weekly_email
+from mailer import send_cash_reminder_email, send_leave_request_email, send_missing_revenue_email, send_monthly_email, send_pin_request_email, send_report_email, send_restaurant_daily_email, send_weekly_email
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -632,6 +632,33 @@ async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, 
             await asyncio.to_thread(send_cash_reminder_email, {**rec, "restaurant": name})
         last = await _deliver("cash_reminder", trigger, f"{key}:{r['id']}" if key else r["id"], job)
     return last
+
+async def send_missing_revenue(trigger: str, key: str | None = None) -> List[str]:
+    day = datetime.now(TZ).strftime("%d.%m.%Y")
+    warned = []
+    for r in list(RESTAURANTS):
+        token = current_rid.set(r["id"])
+        try:
+            revenue = (await build_report("daily"))["revenue"]
+        finally:
+            current_rid.reset(token)
+        if revenue:
+            continue
+        to = (rest.DOCS.get(r["id"], {}).get("email") or "").strip() or None
+        async def job(_day, name=r["name"], to=to):
+            await asyncio.to_thread(send_missing_revenue_email, name, day, to)
+        await _deliver("missing_revenue", trigger, f"{key}:{r['id']}" if key else r["id"], job)
+        warned.append(r["id"])
+    return warned
+
+@api.post("/cron/missing-revenue")
+async def cron_missing_revenue(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    run_id = await accept_cron(request)
+    if not run_id:
+        return {"status": "duplicate"}
+    background.add_task(send_missing_revenue, "cron", run_id)
+    return {"status": "accepted"}
 
 @api.post("/cron/cash-reminder")
 async def cron_cash_reminder(request: Request, background: BackgroundTasks):
@@ -1594,11 +1621,15 @@ TR_SLUG = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
 class RestaurantIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     email: str = Field(default="", max_length=120)
+    manager_name: str = Field(default="", max_length=60)
+    manager_phone: str = Field(default="", max_length=25)
     pin: str = Field(default="", max_length=6)
 
 class RestaurantPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     email: str | None = Field(default=None, max_length=120)
+    manager_name: str | None = Field(default=None, max_length=60)
+    manager_phone: str | None = Field(default=None, max_length=25)
     pin: str | None = Field(default=None, max_length=6)
 
 class UnlockIn(BaseModel):
@@ -1606,7 +1637,7 @@ class UnlockIn(BaseModel):
 
 def _public_restaurant(d: Dict[str, Any]) -> Dict[str, Any]:
     return {"id": d["id"], "name": d["name"], "email": d.get("email", ""), "has_pin": bool(d.get("pin_hash")), "archived": bool(d.get("archived")), "created_at": d.get("created_at", ""),
-            "logo_id": d.get("logo_id", ""), "cover_id": d.get("cover_id", "")}
+            "logo_id": d.get("logo_id", ""), "cover_id": d.get("cover_id", ""), "manager_name": d.get("manager_name", ""), "manager_phone": d.get("manager_phone", "")}
 
 async def _check_email(email: str, rid: str | None) -> str:
     email = email.strip().lower()
@@ -1615,6 +1646,12 @@ async def _check_email(email: str, rid: str | None) -> str:
     if email and any(d["id"] != rid and (d.get("email") or "").lower() == email for d in rest.DOCS.values()):
         raise HTTPException(status_code=409, detail="Bu e-posta başka bir restorana tanımlı")
     return email
+
+def _phone(phone: str) -> str:
+    phone = phone.strip()
+    if phone and len(re.sub(r"\D", "", phone)) < 10:
+        raise HTTPException(status_code=422, detail="Telefon numarası eksik görünüyor (örn. 0532 123 45 67)")
+    return phone
 
 def _pin_hash(pin: str) -> str:
     if pin and not re.fullmatch(PIN_RE, pin):
@@ -1638,7 +1675,7 @@ async def create_restaurant(body: RestaurantIn, request: Request):
     rid, n = base, 2
     while rid in rest.DOCS:
         rid, n = f"{base}-{n}", n + 1
-    doc = {"id": rid, "name": body.name.strip(), "email": email, "pin_hash": _pin_hash(body.pin), "archived": False, "created_at": datetime.now(timezone.utc).isoformat()}
+    doc = {"id": rid, "name": body.name.strip(), "email": email, "manager_name": body.manager_name.strip(), "manager_phone": _phone(body.manager_phone), "pin_hash": _pin_hash(body.pin), "archived": False, "created_at": datetime.now(timezone.utc).isoformat()}
     await db.raw.restaurants.insert_one({**doc})
     await _link_email(rid, "", email)
     await audit(request, "Restoran ekledi", "restaurants", rid, detail=doc["name"])
@@ -1656,6 +1693,10 @@ async def update_restaurant(rid: str, body: RestaurantPatch, request: Request):
         changes["email"] = await _check_email(body.email, rid)
     if body.pin is not None:
         changes["pin_hash"] = _pin_hash(body.pin)
+    if body.manager_name is not None:
+        changes["manager_name"] = body.manager_name.strip()
+    if body.manager_phone is not None:
+        changes["manager_phone"] = _phone(body.manager_phone)
     await db.raw.restaurants.update_one({"id": rid}, {"$set": changes})
     if "email" in changes:
         await _link_email(rid, (old.get("email") or "").lower(), changes["email"])

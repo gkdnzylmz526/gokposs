@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Archive, Check, KeyRound, Mail, Pencil, Plus, RotateCcw, Store, X } from "lucide-react";
+import { Archive, Check, KeyRound, Mail, MessageCircle, Pencil, Phone, Plus, RotateCcw, Store, X } from "lucide-react";
+import { waLink } from "@/lib/phone";
 import { RestaurantImages, imageUrl } from "@/components/RestaurantImages";
 import { errorText } from "@/lib/restaurant";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const blank = { name: "", email: "", pin: "" };
+const blank = { name: "", email: "", manager_name: "", manager_phone: "", pin: "" };
 
 function RestaurantForm({ item, onClose, onSaved, onImages }) {
-  const [form, setForm] = useState(item ? { name: item.name, email: item.email, pin: "" } : blank);
+  const [form, setForm] = useState(item ? { name: item.name, email: item.email, manager_name: item.manager_name || "", manager_phone: item.manager_phone || "", pin: "" } : blank);
   const [clearPin, setClearPin] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: k === "pin" ? e.target.value.replace(/\D/g, "") : e.target.value });
   const save = async (e) => {
     e.preventDefault();
     try {
-      if (item) await axios.patch(`${API}/restaurants/manage/${item.id}`, { name: form.name, email: form.email, ...(form.pin ? { pin: form.pin } : clearPin ? { pin: "" } : {}) });
+      if (item) await axios.patch(`${API}/restaurants/manage/${item.id}`, { name: form.name, email: form.email, manager_name: form.manager_name, manager_phone: form.manager_phone, ...(form.pin ? { pin: form.pin } : clearPin ? { pin: "" } : {}) });
       else await axios.post(`${API}/restaurants/manage`, form);
       toast.success(item ? "Restoran güncellendi" : "Restoran eklendi"); onSaved();
     } catch (err) { toast.error(errorText(err, "Kaydedilemedi")); }
@@ -24,6 +25,8 @@ function RestaurantForm({ item, onClose, onSaved, onImages }) {
     <form className="rest-form" onSubmit={save} data-testid="restaurant-form">
       <label><span>Restoran adı</span><input required value={form.name} onChange={set("name")} placeholder="örn. Bakırköy Şube" data-testid="restaurant-form-name" /></label>
       <label><span>Restoran e-postası (bu e-postayla giren sadece bu restoranı görür)</span><input type="email" value={form.email} onChange={set("email")} placeholder="sube@ornek.com" data-testid="restaurant-form-email" /></label>
+      <label><span>Müdür adı</span><input value={form.manager_name} onChange={set("manager_name")} placeholder="örn. Ahmet Yılmaz" data-testid="restaurant-form-manager-name" /></label>
+      <label><span>Müdür telefonu (WhatsApp)</span><input type="tel" value={form.manager_phone} onChange={set("manager_phone")} placeholder="0532 123 45 67" data-testid="restaurant-form-manager-phone" /></label>
       <label><span>{item?.has_pin ? "Yeni şifre (boş bırakılırsa değişmez)" : "Şifre (4-6 rakam, boşsa şifresiz)"}</span><input type="password" inputMode="numeric" maxLength={6} value={form.pin} onChange={set("pin")} placeholder="••••" data-testid="restaurant-form-pin" /></label>
       {item && <RestaurantImages item={item} onChange={onImages} />}
       {item?.has_pin && <label className="rest-check"><input type="checkbox" checked={clearPin} onChange={(e) => setClearPin(e.target.checked)} data-testid="restaurant-form-clear-pin" /> Şifreyi kaldır</label>}
@@ -36,7 +39,8 @@ function RestaurantRow({ r, onEdit, onToggle }) {
   return (
     <div className={`rest-row ${r.archived ? "archived" : ""}`} data-testid={`restaurant-row-${r.id}`}>
       {r.logo_id ? <img className="rest-logo-thumb" src={imageUrl(r.logo_id)} alt="" /> : <Store size={18} />}
-      <div><b>{r.name}</b><small>{r.email ? <><Mail size={11} /> {r.email}</> : "E-posta yok"} · {r.has_pin ? <><KeyRound size={11} /> Şifreli</> : "Şifresiz"}{r.archived && " · Arşivde"}</small></div>
+      <div><b>{r.name}</b><small>{r.email ? <><Mail size={11} /> {r.email}</> : "E-posta yok"} · {r.has_pin ? <><KeyRound size={11} /> Şifreli</> : "Şifresiz"}{r.archived && " · Arşivde"}</small>{(r.manager_name || r.manager_phone) && <small data-testid={`restaurant-manager-${r.id}`}><Phone size={11} /> {r.manager_name || "Müdür"}{r.manager_phone && ` · ${r.manager_phone}`}</small>}</div>
+      {r.manager_phone && !r.archived ? <a className="text-button wa-button" href={waLink(r.manager_phone, `Merhaba ${r.manager_name || ""}, ${r.name} hakkında yazıyorum.`.replace("  ", " "))} target="_blank" rel="noreferrer" data-testid={`restaurant-whatsapp-${r.id}`}><MessageCircle size={14} /> WhatsApp</a> : <span />}
       {!r.archived && <button className="text-button" onClick={onEdit} data-testid={`restaurant-edit-${r.id}`}><Pencil size={14} /> Düzenle</button>}
       <button className={`text-button ${r.archived ? "" : "danger-text"}`} onClick={onToggle} data-testid={`restaurant-${r.archived ? "restore" : "archive"}-${r.id}`}>{r.archived ? <><RotateCcw size={14} /> Geri al</> : <><Archive size={14} /> Sil</>}</button>
     </div>

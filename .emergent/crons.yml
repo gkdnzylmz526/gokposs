@@ -31,3 +31,11 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: missing-revenue
+    description: "Emails the restaurant manager at 23:00 Istanbul time if that day's revenue has not been entered"
+    cron: "0 23 * * *"
+    timezone: "Europe/Istanbul"
+    endpoint: "{{BASE_URL}}/api/cron/missing-revenue"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

@@ -193,3 +193,5 @@
 - Restaurant logo + cover photo (admin edit form; object storage; served via /api/public/photos/{id}); shown in Genel Bakış hero, sidebar logo, PinGate.
 - "Şifremi unuttum": manager requests new PIN from PinGate -> admin approves/rejects in Restoranlar panel (email notify to REPORT_RECIPIENT; 1 pending per 10 min).
 - Nightly daily report also sends per-restaurant summary to each restaurant's email. Tested iteration_25 (33/33 backend, frontend 100%).
+- Restaurant manager name + phone (Restoranlar form); WhatsApp button (wa.me, TR normalization via lib/phone.js).
+- Missing revenue alert: cron `missing-revenue` 23:00 Europe/Istanbul -> /api/cron/missing-revenue; restaurants with 0 revenue today get an email to the restaurant email (fallback REPORT_RECIPIENT). 5/5 crons now used. Self-tested (curl + mocked send + screenshot).
