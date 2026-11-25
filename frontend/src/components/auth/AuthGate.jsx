@@ -3,6 +3,7 @@ import axios from "axios";
 import { SignOutButton, useAuth, useUser } from "@clerk/react";
 import { ShieldAlert } from "lucide-react";
 import StaffApp from "@/pages/StaffApp";
+import { getRestaurant, session, setRestaurant, setRestaurantsList } from "@/lib/restaurant";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -19,11 +20,11 @@ export const AuthGate = ({ children }) => {
       return config;
     });
     setReady(true);
-    axios.get(`${API}/me`).then(({ data }) => setMe(data)).catch((e) => setMe({ role: e.response?.status === 403 ? "member" : "error" }));
+    axios.get(`${API}/me`).then(({ data }) => { session.role = data.role; setRestaurantsList(data.restaurants || []); setRestaurant(data.role === "manager" ? data.restaurant_id : getRestaurant()); setMe(data); }).catch((e) => setMe({ role: e.response?.status === 403 ? "member" : "error" }));
     return () => axios.interceptors.request.eject(id);
   }, [getToken]);
   if (!ready || !me) return <div className="auth-loading" data-testid="auth-loading">Yükleniyor…</div>;
-  if (me.role === "admin") return children;
+  if (me.role === "admin" || me.role === "manager") return children;
   if (me.role === "staff") return <StaffApp me={me} />;
   if (me.role === "error") return <div className="auth-loading" data-testid="auth-error"><div style={{ textAlign: "center" }}><p>Bağlantı kurulamadı. Lütfen tekrar deneyin.</p><button className="primary-button" data-testid="auth-retry" onClick={() => window.location.reload()}>Tekrar dene</button></div></div>;
   return (

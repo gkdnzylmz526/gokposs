@@ -227,3 +227,20 @@
 .rev-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .rev-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; background: #f6f3ee; border-radius: 999px; padding: 5px 10px; }
 .rev-chip button { border: 0; background: none; color: #b54a3a; cursor: pointer; padding: 0; display: flex; }
+.pin-gate { max-width: 380px; margin: 60px auto; display: grid; gap: 14px; justify-items: center; text-align: center; padding: 36px 30px; animation: pinIn .35s ease-out; }
+.pin-gate h2 { margin: 0; font-size: 22px; }
+.pin-icon { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; background: #fbf1df; color: #c27f17; }
+.pin-field { display: grid; gap: 6px; width: 100%; font-size: 13px; font-weight: 600; text-align: left; }
+.pin-field input { width: 100%; box-sizing: border-box; height: 52px; text-align: center; font-size: 24px; letter-spacing: 10px; border: 1px solid #e3ded6; border-radius: 14px; transition: border-color .2s; }
+.pin-field input:focus { outline: none; border-color: #e0a23a; }
+.pin-gate .primary-button { width: 100%; justify-content: center; }
+@keyframes pinIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.rest-admin { margin-bottom: 22px; }
+.rest-row { display: grid; grid-template-columns: 24px 1fr auto auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid #f0ece6; }
+.rest-row small { display: flex; align-items: center; gap: 4px; color: #8a8378; font-size: 12px; margin-top: 3px; flex-wrap: wrap; }
+.rest-row.archived { opacity: .55; }
+.rest-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; padding: 16px; margin-bottom: 10px; background: #faf8f4; border-radius: 14px; }
+.rest-form label { display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
+.rest-form input:not([type=checkbox]) { height: 42px; border: 1px solid #e3ded6; border-radius: 10px; padding: 0 12px; font-size: 14px; }
+.rest-check { display: flex !important; align-items: center; gap: 8px; }
+.rest-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; }

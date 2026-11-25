@@ -30,6 +30,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 from storage import APP_PREFIX, get_object, init_storage, put_object
+import restaurants as rest
 from scope import DEFAULT_RESTAURANT, RESTAURANT_IDS, RESTAURANT_NAMES, RESTAURANTS, SCOPED, ScopedDB, current_rid, specific_rid
 db = ScopedDB(client[os.environ["DB_NAME"]])
 try:  # launched as `backend.server` (the default)
@@ -40,7 +41,7 @@ import requests as http_requests
 from pymongo import ReturnDocument as _RD
 
 # The role list is code, so every publish ships it to Live. Highest first; keep `admin`.
-ROLES = ["admin", "staff", "member"]
+ROLES = ["admin", "manager", "staff", "member"]
 DEFAULT_ROLE = "member"
 RETIRED_ROLES: Dict[str, str] = {}
 RANK = {r: len(ROLES) - i for i, r in enumerate(ROLES)}
@@ -62,6 +63,10 @@ def _is_admin_email(info: Dict[str, Any]) -> bool:
     admins = {e.strip().lower() for e in os.environ.get("ADMIN_EMAIL", "").split(",") if e.strip()}
     return any(e["email_address"].lower() in admins and (e.get("verification") or {}).get("status") == "verified" for e in info["email_addresses"])
 
+def _restaurant_for_email(info: Dict[str, Any]) -> str | None:
+    verified = {e["email_address"].lower() for e in info["email_addresses"] if (e.get("verification") or {}).get("status") == "verified"}
+    return next((d["id"] for d in rest.DOCS.values() if not d.get("archived") and (d.get("email") or "").lower() in verified), None)
+
 async def current_member(request: Request) -> Dict[str, Any]:
     user = require_user(request)
     uid = user["user_id"]
@@ -70,8 +75,10 @@ async def current_member(request: Request) -> Dict[str, Any]:
         info = await asyncio.to_thread(_clerk_user, uid)
         role = "admin" if _is_admin_email(info) else DEFAULT_ROLE
         email = next((e["email_address"] for e in info["email_addresses"] if e["id"] == info.get("primary_email_address_id")), "")
-        await db.users.update_one({"user_id": uid, "role": {"$in": [None, ""]}}, {"$set": {"role": role}})
-        member = await db.users.find_one_and_update({"user_id": uid}, {"$setOnInsert": {"user_id": uid, "role": role, "email": email, "created_at": datetime.now(timezone.utc).isoformat()}},
+        home = _restaurant_for_email(info) if role != "admin" else None
+        extra = {"role": "manager", "restaurant_id": home} if home else {"role": role}
+        await db.users.update_one({"user_id": uid, "role": {"$in": [None, ""]}}, {"$set": extra})
+        member = await db.users.find_one_and_update({"user_id": uid}, {"$setOnInsert": {"user_id": uid, **extra, "email": email, "created_at": datetime.now(timezone.utc).isoformat()}},
                                                     upsert=True, projection={"_id": 0}, return_document=_RD.AFTER)
     if member.get("env") != ENV:
         await db.users.update_one({"user_id": uid}, {"$set": {"env": ENV}})
@@ -80,6 +87,8 @@ async def current_member(request: Request) -> Dict[str, Any]:
 STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r"/api/inventory/[\w-]+/count"), ("GET", r"/api/tables-view"),
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
+ADMIN_ONLY = r"/api/(users|settings|audit-logs|email|restaurants/manage)(/.*)?"
+PIN_FREE = r"/api/restaurants/(unlock|manage(/.*)?)"
 ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
@@ -117,22 +126,33 @@ async def audit(request: Request, action: str, collection: str, item_id: str, do
 
 async def dashboard_guard(request: Request) -> None:
     """Every /api route except the staff leave link and cron webhooks is admin-only."""
-    if request.url.path.startswith(PUBLIC_PREFIXES):
+    rest.refresh(await db.raw.restaurants.find({}, {"_id": 0}).sort("created_at", 1).to_list(200))
+    path = request.url.path
+    if path.startswith(PUBLIC_PREFIXES):
         return
-    if request.url.path in ("/api/me",):
+    if path in ("/api/me",):
         return
     member = await current_member(request)
     request.state.member = member
-    if member["role"] == "staff" and staff_allowed(request.method, request.url.path):
-        current_rid.set(member.get("restaurant_id") or DEFAULT_RESTAURANT)
+    if member["role"] == "staff" and staff_allowed(request.method, path):
+        current_rid.set(member.get("restaurant_id") or rest.default_rid())
         return
-    if member["role"] != "admin":
+    if member["role"] not in ("admin", "manager"):
         raise HTTPException(status_code=403, detail="Bu panele erişim yetkiniz yok")
-    rid = request.headers.get("x-restaurant") or DEFAULT_RESTAURANT
-    if rid not in RESTAURANT_IDS and rid != "all":
-        raise HTTPException(status_code=400, detail="Geçersiz restoran")
-    if rid == "all" and request.method != "GET" and not re.fullmatch(ALL_MODE_WRITES, request.url.path):
-        raise HTTPException(status_code=400, detail="Bu işlem için üstten bir restoran seçin")
+    if member["role"] == "manager":
+        if re.fullmatch(ADMIN_ONLY, path) or (path == "/api/overhead" and request.method != "GET"):
+            raise HTTPException(status_code=403, detail="Bu işlem sadece yönetici içindir")
+        rid = member.get("restaurant_id")
+        if rid not in RESTAURANT_IDS:
+            raise HTTPException(status_code=403, detail="Restoranınız arşivlenmiş veya atanmamış")
+    else:
+        rid = request.headers.get("x-restaurant") or rest.default_rid()
+        if rid not in RESTAURANT_IDS and rid != "all":
+            raise HTTPException(status_code=400, detail="Geçersiz restoran")
+        if rid == "all" and request.method != "GET" and not re.fullmatch(ALL_MODE_WRITES, path):
+            raise HTTPException(status_code=400, detail="Bu işlem için üstten bir restoran seçin")
+    if not re.fullmatch(PIN_FREE, path):
+        rest.require_unlocked(member["user_id"], rid, request.headers.get("x-restaurant-key"))
     current_rid.set(rid)
 
 api = APIRouter(prefix="/api", dependencies=[Depends(dashboard_guard)])
@@ -513,14 +533,17 @@ async def cron_weekly_summary(request: Request, background: BackgroundTasks):
 @api.get("/me")
 async def me(request: Request):
     member = await current_member(request)
-    rid = member.get("restaurant_id") or DEFAULT_RESTAURANT
-    return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"], "restaurants": RESTAURANTS,
-            "restaurant_id": rid, "restaurant_name": RESTAURANT_NAMES[rid], "staff_id": member.get("staff_id", ""), **(await app_settings())}
+    rest.refresh(await db.raw.restaurants.find({}, {"_id": 0}).sort("created_at", 1).to_list(200))
+    rid = member.get("restaurant_id") or rest.default_rid()
+    mine = [r for r in RESTAURANTS if member["role"] == "admin" or r["id"] == rid]
+    return {"user_id": member["user_id"], "email": member.get("email", ""), "role": member["role"], "restaurants": mine,
+            "restaurant_id": rid, "restaurant_name": RESTAURANT_NAMES.get(rid, ""), "staff_id": member.get("staff_id", ""), **(await app_settings())}
 
 @api.get("/users")
 async def list_users():
     people = await db.users.find(IN_ENV, {"_id": 0}).to_list(1000)
-    return {"roles": ROLES, "users": [{**p, "role": effective_role(p.get("role"))} for p in people]}
+    staff = await db.raw.staff.find({}, {"_id": 0, "id": 1, "name": 1, "restaurant_id": 1}).to_list(2000)
+    return {"roles": ROLES, "users": [{**p, "role": effective_role(p.get("role"))} for p in people], "staff": staff}
 
 class RoleIn(BaseModel):
     role: str
@@ -1534,9 +1557,13 @@ async def attendance_clock(request: Request):
     return {"status": "in", "start": doc["start"]}
 
 @api.get("/restaurants/summary")
-async def restaurants_summary():
+async def restaurants_summary(request: Request):
+    member = request.state.member
+    if member["role"] == "manager":
+        return []
+    opened = rest.unlocked(member["user_id"], request.headers.get("x-restaurant-key"))
     rows = []
-    for r in RESTAURANTS:
+    for r in [r for r in RESTAURANTS if not r["has_pin"] or r["id"] in opened]:
         token = current_rid.set(r["id"])
         try:
             today, month = await build_report("daily"), await build_report("monthly")
@@ -1547,6 +1574,111 @@ async def restaurants_summary():
         rows.append({**r, "today_revenue": today["revenue"], "today_expenses": today["expenses"], "today_profit": today["profit"], "today_sales": today["sales_count"],
                      "month_revenue": month["revenue"], "month_profit": month["profit"], "low_stock": low, "open_tables": open_tables})
     return rows
+
+PIN_RE = r"\d{4,6}"
+TR_SLUG = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+
+class RestaurantIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    email: str = Field(default="", max_length=120)
+    pin: str = Field(default="", max_length=6)
+
+class RestaurantPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    email: str | None = Field(default=None, max_length=120)
+    pin: str | None = Field(default=None, max_length=6)
+
+class UnlockIn(BaseModel):
+    pins: Dict[str, str]
+
+def _public_restaurant(d: Dict[str, Any]) -> Dict[str, Any]:
+    return {"id": d["id"], "name": d["name"], "email": d.get("email", ""), "has_pin": bool(d.get("pin_hash")), "archived": bool(d.get("archived")), "created_at": d.get("created_at", "")}
+
+async def _check_email(email: str, rid: str | None) -> str:
+    email = email.strip().lower()
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=422, detail="Geçerli bir e-posta yazın")
+    if email and any(d["id"] != rid and (d.get("email") or "").lower() == email for d in rest.DOCS.values()):
+        raise HTTPException(status_code=409, detail="Bu e-posta başka bir restorana tanımlı")
+    return email
+
+def _pin_hash(pin: str) -> str:
+    if pin and not re.fullmatch(PIN_RE, pin):
+        raise HTTPException(status_code=422, detail="Şifre 4-6 haneli rakam olmalı")
+    return rest.hash_pin(pin) if pin else ""
+
+async def _link_email(rid: str, old: str, new: str) -> None:
+    if old and old != new:
+        await db.users.update_many({"role": "manager", "restaurant_id": rid, "email": {"$regex": f"^{re.escape(old)}$", "$options": "i"}}, {"$set": {"role": "member"}})
+    if new:
+        await db.users.update_many({"role": {"$ne": "admin"}, "email": {"$regex": f"^{re.escape(new)}$", "$options": "i"}}, {"$set": {"role": "manager", "restaurant_id": rid, "staff_id": ""}})
+
+@api.get("/restaurants/manage")
+async def manage_restaurants():
+    return [_public_restaurant(d) for d in rest.DOCS.values()]
+
+@api.post("/restaurants/manage")
+async def create_restaurant(body: RestaurantIn, request: Request):
+    email = await _check_email(body.email, None)
+    base = re.sub(r"[^a-z0-9]+", "-", body.name.strip().translate(TR_SLUG).lower()).strip("-") or "restoran"
+    rid, n = base, 2
+    while rid in rest.DOCS:
+        rid, n = f"{base}-{n}", n + 1
+    doc = {"id": rid, "name": body.name.strip(), "email": email, "pin_hash": _pin_hash(body.pin), "archived": False, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.raw.restaurants.insert_one({**doc})
+    await _link_email(rid, "", email)
+    await audit(request, "Restoran ekledi", "restaurants", rid, detail=doc["name"])
+    return _public_restaurant(doc)
+
+@api.patch("/restaurants/manage/{rid}")
+async def update_restaurant(rid: str, body: RestaurantPatch, request: Request):
+    old = rest.DOCS.get(rid)
+    if not old:
+        raise HTTPException(status_code=404, detail="Restoran bulunamadı")
+    changes: Dict[str, Any] = {}
+    if body.name is not None:
+        changes["name"] = body.name.strip()
+    if body.email is not None:
+        changes["email"] = await _check_email(body.email, rid)
+    if body.pin is not None:
+        changes["pin_hash"] = _pin_hash(body.pin)
+    await db.raw.restaurants.update_one({"id": rid}, {"$set": changes})
+    if "email" in changes:
+        await _link_email(rid, (old.get("email") or "").lower(), changes["email"])
+    await audit(request, "Restoranı düzenledi", "restaurants", rid, detail=f"{changes.get('name', old['name'])}{' · şifre değişti' if 'pin_hash' in changes else ''}")
+    return _public_restaurant({**old, **changes})
+
+@api.post("/restaurants/manage/{rid}/archive")
+async def archive_restaurant(rid: str, request: Request):
+    if rid not in RESTAURANT_IDS:
+        raise HTTPException(status_code=404, detail="Restoran bulunamadı")
+    if len(RESTAURANT_IDS) <= 1:
+        raise HTTPException(status_code=409, detail="En az bir aktif restoran kalmalı")
+    await db.raw.restaurants.update_one({"id": rid}, {"$set": {"archived": True}})
+    await audit(request, "Restoranı arşivledi", "restaurants", rid, detail=RESTAURANT_NAMES[rid])
+    return {"id": rid, "archived": True}
+
+@api.post("/restaurants/manage/{rid}/restore")
+async def restore_restaurant(rid: str, request: Request):
+    if rid not in rest.DOCS:
+        raise HTTPException(status_code=404, detail="Restoran bulunamadı")
+    await db.raw.restaurants.update_one({"id": rid}, {"$set": {"archived": False}})
+    await audit(request, "Restoranı geri aldı", "restaurants", rid, detail=RESTAURANT_NAMES[rid])
+    return {"id": rid, "archived": False}
+
+@api.post("/restaurants/unlock")
+async def unlock_restaurants(body: UnlockIn, request: Request):
+    member = request.state.member
+    uid = member["user_id"]
+    rest.throttle(uid)
+    for rid, pin in body.pins.items():
+        doc = rest.DOCS.get(rid)
+        if not doc or doc.get("archived") or (member["role"] == "manager" and rid != member.get("restaurant_id")):
+            raise HTTPException(status_code=403, detail="Bu restorana erişiminiz yok")
+        if doc.get("pin_hash") and not rest.check_pin(str(pin), doc["pin_hash"]):
+            rest.record_fail(uid)
+            raise HTTPException(status_code=401, detail=f"{doc['name']} şifresi hatalı")
+    return {"token": rest.make_token(uid, list(body.pins))}
 
 DEFAULT_OVERHEAD = ["Kira", "Elektrik", "Su", "Doğalgaz", "İnternet / telefon", "Personel maaşları", "SGK / vergi", "Muhasebe", "Diğer"]
 
@@ -1924,6 +2056,10 @@ async def startup():
     await db.cron_runs.create_index("run_id", unique=True)
     with suppress(Exception):
         await asyncio.to_thread(init_storage)
+    if not await db.raw.restaurants.count_documents({}):
+        now = datetime.now(timezone.utc).isoformat()
+        await db.raw.restaurants.insert_many([{**r, "email": "", "pin_hash": "", "archived": False, "created_at": f"{now}-{i}"} for i, r in enumerate(rest.SEED)])
+    rest.refresh(await db.raw.restaurants.find({}, {"_id": 0}).sort("created_at", 1).to_list(200))
     for name in SCOPED:
         await db.raw[name].update_many({"restaurant_id": {"$exists": False}}, {"$set": {"restaurant_id": DEFAULT_RESTAURANT}})
 
