@@ -180,3 +180,4 @@
 
 ## Iteration 24 (Haziran 2026)
 - QR menu: categories auto-grouped (Turkish case/space-insensitive, first-letter capitalised), category cards (cover = first product photo, item count) → tap shows products with sticky category tabs, back button / phone back. Verified via screenshot + API. Redeploy requested.
+- Iteration 25: QR menu header rebranded 'Florya Dürüm Tır · MENÜ' (Bebas Neue + Playfair italic), storefront photo hero (user upload made public), GÖKBOSS removed from customer menu. Redeploy requested.

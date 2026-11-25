@@ -583,7 +583,7 @@ async def public_menu():
     for g in cats:
         g["cover"] = next((i["photo_url"] for i in g["items"] if i["photo_url"]), "")
         g["count"] = len(g["items"])
-    return {"name": "GÖKBOSS", "categories": cats}
+    return {"name": "Florya Dürüm Tır", "categories": cats}
 
 async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
     last = None

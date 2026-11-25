@@ -3,6 +3,7 @@ import axios from "axios";
 import { ArrowLeft, UtensilsCrossed } from "lucide-react";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
+const HERO = "https://customer-assets-39nsmqrw.emergentagent.net/job_restoran-asistan--8vayy60i/artifacts/cbebb3fc44bb689b_image_fc333cee.jpg";
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
 
 function CategoryGrid({ categories, onPick }) {
@@ -37,14 +38,17 @@ export default function MenuPage() {
   const [error, setError] = useState(false);
   const [zoom, setZoom] = useState(null);
   const [active, setActive] = useState(null);
-  useEffect(() => { document.title = "GÖKBOSS · Menü"; axios.get(`${BASE}/api/public/menu`).then(({ data }) => setMenu(data)).catch(() => setError(true)); }, []);
+  useEffect(() => { document.title = "Florya Dürüm Tır · Menü"; axios.get(`${BASE}/api/public/menu`).then(({ data }) => setMenu(data)).catch(() => setError(true)); }, []);
   useEffect(() => { const onPop = () => setActive(null); window.addEventListener("popstate", onPop); return () => window.removeEventListener("popstate", onPop); }, []);
   const pick = (i) => { if (active === null) window.history.pushState({ cat: i }, ""); setActive(i); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const back = () => { if (window.history.state?.cat !== undefined) window.history.back(); else setActive(null); };
   const cats = menu?.categories || [];
   return (
     <div className="qr-menu" data-testid="public-menu">
-      <header><div className="brand-mark">G</div><h1>GÖKBOSS</h1><p>{active === null ? "Menü · bir kategori seçin" : "Menü"}</p></header>
+      <header className={`qr-hero ${active === null ? "" : "compact"}`} data-testid="menu-hero">
+        <img src={HERO} alt="Florya Dürüm Tır" />
+        <div className="qr-hero-text"><span className="qr-hero-kicker">— Taş fırın · Dürüm · Lahmacun —</span><h1 data-testid="menu-title">Florya <em>Dürüm</em> Tır</h1><p className="qr-hero-menu">M E N Ü</p>{active === null && <small>Bir kategori seçin</small>}</div>
+      </header>
       {error && <div className="empty-state">Menü yüklenemedi, lütfen tekrar deneyin.</div>}
       {menu && !cats.length && <div className="empty-state">Menü yakında burada.</div>}
       {active === null ? <CategoryGrid categories={cats} onPick={pick} /> : (
