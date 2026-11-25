@@ -182,3 +182,7 @@
 - QR menu: categories auto-grouped (Turkish case/space-insensitive, first-letter capitalised), category cards (cover = first product photo, item count) → tap shows products with sticky category tabs, back button / phone back. Verified via screenshot + API. Redeploy requested.
 - Iteration 25: QR menu header rebranded 'Florya Dürüm Tır · MENÜ' (Bebas Neue + Playfair italic), storefront photo hero (user upload made public), GÖKBOSS removed from customer menu. Redeploy requested.
 - Iteration 26: QR menu smooth transitions (grid fade, directional slide between categories, staggered items, swipe left/right to change category, active tab auto-centred, reduced-motion respected). Redeploy requested.
+
+## 2026-11-25
+- QR menu hero photo replaced with user's Etiler Marmaris storefront photo (public asset).
+- New "Ciro Girişi" sidebar tab (components/RevenueEntry.jsx): manual daily revenue form (Nakit, Kart, Yemek kartı, Havale, Yemeksepeti, Getir, Trendyol) -> saves to incomes; day-grouped list with delete. Self-tested via screenshot.

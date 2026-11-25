@@ -3,7 +3,7 @@ import axios from "axios";
 import { ArrowLeft, UtensilsCrossed } from "lucide-react";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
-const HERO = "https://customer-assets-39nsmqrw.emergentagent.net/job_restoran-asistan--8vayy60i/artifacts/cbebb3fc44bb689b_image_fc333cee.jpg";
+const HERO = "https://customer-assets-39nsmqrw.emergentagent.net/job_restoran-asistan--8vayy60i/artifacts/517d09d772f8ef18_WhatsApp%20Image%202026-11-25%20at%2017.37.25.jpeg";
 const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 2 }).format(n || 0);
 
 function CategoryGrid({ categories, onPick }) {
