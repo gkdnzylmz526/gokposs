@@ -177,3 +177,6 @@
 - Fixed costs in product cost: /api/overhead (manual monthly items: kira, elektrik, su, maaş…; monthly revenue manual or last-30-day auto, one ratio for 3 restaurants). Product cost page shows overhead share (price × ratio), full cost, net margin, suggested price incl. overhead; calculator, product card suggestion, bulk price apply and print cards all overhead-aware.
 - Product photos: POST/DELETE /api/products/{id}/photo (client downscale to JPEG ≤1200px), public /api/public/photos/{id}; QR menu shows thumbnails + zoom + product description field.
 - Tested iteration_22/23 (backend 100%, frontend 100%); minor follow-ups fixed. Redeploy requested.
+
+## Iteration 24 (Haziran 2026)
+- QR menu: categories auto-grouped (Turkish case/space-insensitive, first-letter capitalised), category cards (cover = first product photo, item count) → tap shows products with sticky category tabs, back button / phone back. Verified via screenshot + API. Redeploy requested.

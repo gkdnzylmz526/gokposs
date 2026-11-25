@@ -571,13 +571,19 @@ async def staff_view(request: Request):
 
 @api.get("/public/menu")
 async def public_menu():
-    groups: Dict[str, List[Dict[str, Any]]] = {}
-    for p in sorted(await list_items("products", limit=None), key=lambda x: x["name"]):
+    """Products grouped by category; 'kebap' and 'Kebap ' land in the same group."""
+    groups: Dict[str, Dict[str, Any]] = {}
+    for p in sorted(await list_items("products", limit=None), key=lambda x: _tr_key(x["name"])):
         if p.get("active", True):
+            raw = (p.get("category") or "").strip() or "Menü"
+            group = groups.setdefault(_tr_key(raw), {"category": ("İ" if raw[0] == "i" else raw[0].upper()) + raw[1:], "items": []})
             photo = (p.get("photo") or {}).get("id")
-            groups.setdefault(p.get("category") or "Menü", []).append({"name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""),
-                                                                   "photo_url": f"/api/public/photos/{photo}" if photo else ""})
-    return {"name": "GÖKBOSS", "categories": [{"category": k, "items": v} for k, v in sorted(groups.items())]}
+            group["items"].append({"name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""), "photo_url": f"/api/public/photos/{photo}" if photo else ""})
+    cats = sorted(groups.values(), key=lambda g: _tr_key(g["category"]))
+    for g in cats:
+        g["cover"] = next((i["photo_url"] for i in g["items"] if i["photo_url"]), "")
+        g["count"] = len(g["items"])
+    return {"name": "GÖKBOSS", "categories": cats}
 
 async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
     last = None
