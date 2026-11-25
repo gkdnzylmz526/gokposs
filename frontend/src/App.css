@@ -248,8 +248,9 @@
 .rest-archive-toggle { margin-top: 12px; }
 .restaurant-card.locked strong { display: flex; align-items: center; gap: 8px; color: #8a8378; }
 .pin-gate.with-cover { padding-top: 0; overflow: hidden; }
-.pin-cover { width: calc(100% + 60px); margin: 0 -30px; height: 150px; object-fit: cover; }
-.pin-logo { width: 76px; height: 76px; border-radius: 20px; object-fit: contain; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.pin-cover { width: calc(100% + 60px); margin: 0 -30px; height: 150px; object-fit: cover; display: block; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.pin-gate.with-cover { padding-top: 0 !important; }
+.pin-logo { width: 76px; height: 76px; border-radius: 20px; object-fit: contain; background: #fbf1df; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
 .pin-gate.with-cover .pin-logo { margin-top: -50px; }
 .rest-logo-thumb { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid #eee; }
 .rest-images { grid-column: 1 / -1; display: flex; gap: 18px; flex-wrap: wrap; }

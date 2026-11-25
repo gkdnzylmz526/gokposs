@@ -190,3 +190,6 @@
 - Per-restaurant 4-6 digit PIN asked every time a restaurant is opened (admin too); "Tüm restoranlar" asks all PINs. Token header X-Restaurant-Key (HMAC, 12h, invalid after PIN change). 5 wrong tries -> 5 min lock.
 - Restaurant email -> user signing in with that verified email becomes role `manager`: sees only that restaurant, no Kullanıcılar/settings/users/audit/overhead edit.
 - Overview shows locked restaurants as "Kilitli" cards. Tested iteration_24 (19/19 backend, frontend flows 100%).
+- Restaurant logo + cover photo (admin edit form; object storage; served via /api/public/photos/{id}); shown in Genel Bakış hero, sidebar logo, PinGate.
+- "Şifremi unuttum": manager requests new PIN from PinGate -> admin approves/rejects in Restoranlar panel (email notify to REPORT_RECIPIENT; 1 pending per 10 min).
+- Nightly daily report also sends per-restaurant summary to each restaurant's email. Tested iteration_25 (33/33 backend, frontend 100%).

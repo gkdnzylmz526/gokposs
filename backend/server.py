@@ -468,7 +468,6 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
         finally:
             current_rid.reset(token)
         report["low_stock"] = [{**i, "name": f"{i['name']} ({r['name']})"} for r in report["restaurants"] for i in r["low_stock"]]
-        await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
         for r in report["restaurants"]:
             to = (rest.DOCS.get(r["id"], {}).get("email") or "").strip()
             if to:
@@ -476,6 +475,7 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
                     await asyncio.to_thread(send_restaurant_daily_email, r, day, to)
                 except Exception:
                     logging.exception("restaurant daily email failed for %s", r["id"])
+        await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
     return await _deliver("daily", trigger, key, job)
 
 async def send_weekly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
@@ -1688,16 +1688,18 @@ class PinRequestIn(BaseModel):
 async def request_pin(body: PinRequestIn, request: Request, background: BackgroundTasks):
     member = request.state.member
     doc = rest.DOCS.get(body.restaurant_id)
-    if not doc or doc.get("archived") or (member["role"] == "manager" and body.restaurant_id != member.get("restaurant_id")):
+    if member["role"] != "manager" or not doc or doc.get("archived") or body.restaurant_id != member.get("restaurant_id"):
         raise HTTPException(status_code=403, detail="Bu restorana erişiminiz yok")
+    recent = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    if await db.raw.pin_requests.find_one({"restaurant_id": body.restaurant_id, "status": "pending", "created_at": {"$gte": recent}}):
+        raise HTTPException(status_code=429, detail="Bekleyen bir talebiniz var. Yeni talep için 10 dakika bekleyin")
     if not re.fullmatch(PIN_RE, body.new_pin):
         raise HTTPException(status_code=422, detail="Şifre 4-6 haneli rakam olmalı")
     await db.raw.pin_requests.update_many({"restaurant_id": body.restaurant_id, "status": "pending"}, {"$set": {"status": "replaced"}})
     req = {"id": str(uuid.uuid4()), "restaurant_id": body.restaurant_id, "user_email": member.get("email", ""), "pin_hash": rest.hash_pin(body.new_pin), "status": "pending", "created_at": datetime.now(timezone.utc).isoformat()}
     await db.raw.pin_requests.insert_one({**req})
     await audit(request, "Şifre talep etti", "restaurants", body.restaurant_id, detail=doc["name"])
-    if member["role"] != "admin":
-        background.add_task(_notify_pin_request, doc["name"], req["user_email"])
+    background.add_task(_notify_pin_request, doc["name"], req["user_email"])
     return {"ok": True}
 
 def _notify_pin_request(name: str, email: str) -> None:
@@ -1734,6 +1736,9 @@ async def upload_restaurant_image(rid: str, kind: str, request: Request, file: U
     data = await file.read()
     if not data or len(data) > 5 * 1024 * 1024:
         raise HTTPException(status_code=422, detail="Fotoğraf boş veya 5 MB'den büyük")
+    ext = "png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "jpg" if data[:3] == b"\xff\xd8\xff" else "webp" if data[:4] == b"RIFF" and data[8:12] == b"WEBP" else ""
+    if not ext:
+        raise HTTPException(status_code=422, detail="Dosya geçerli bir JPG, PNG veya WEBP değil")
     path = f"{APP_PREFIX}/restaurants/{rid}/{kind}-{uuid.uuid4()}.{ext}"
     try:
         result = await asyncio.to_thread(put_object, path, data, PHOTO_TYPES[ext])
@@ -1751,13 +1756,14 @@ async def upload_restaurant_image(rid: str, kind: str, request: Request, file: U
     return {"id": fid}
 
 @api.delete("/restaurants/manage/{rid}/image/{kind}")
-async def delete_restaurant_image(rid: str, kind: str):
+async def delete_restaurant_image(rid: str, kind: str, request: Request):
     if kind not in ("logo", "cover") or rid not in rest.DOCS:
         raise HTTPException(status_code=404, detail="Restoran bulunamadı")
     old = rest.DOCS[rid].get(f"{kind}_id")
     if old:
         await db.files.update_one({"id": old}, {"$set": {"is_deleted": True}})
     await db.raw.restaurants.update_one({"id": rid}, {"$set": {f"{kind}_id": ""}})
+    await audit(request, "Logoyu kaldırdı" if kind == "logo" else "Kapak fotoğrafını kaldırdı", "restaurants", rid, detail=rest.DOCS[rid]["name"])
     return {"ok": True}
 
 @api.post("/restaurants/unlock")

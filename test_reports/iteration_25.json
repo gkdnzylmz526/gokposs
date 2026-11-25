@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 25: tested restaurant logo/cover images, the manager 'Şifremi unuttum' PIN request flow with admin approve/reject, and the iteration 24 regression. Backend: 14/14 new pytest tests pass, and 19/19 iteration 24 tests pass after one assertion was updated to the intended new /restaurants/summary behaviour (locked restaurants are now listed with locked:true instead of hidden). UI (Playwright, 1920x1080), all flows pass. Manager PinGate shows the logo and the forgot link. Mismatched and short PINs show toasts. Valid request shows the success toast; 'Geri dön' works. After unlock: hero banner with logo and name, sidebar logo. Admin sees the pending request card and approves it (toast); the new PIN 4321 works and old 5678 returns 401. Admin edit form shows Logo and Kapak slots; uploading a cover PNG shows the thumbnail plus 'Kaldır' and a success toast; the row shows the logo thumb. Admin PinGate shows cover and logo with no forgot link; hero shows cover and logo after unlock. Florya shows the 'G' mark and no hero. Nightly per-restaurant email was NOT run (no real emails; GMAIL creds are not set in preview); only the code was reviewed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/restaurants/pin-request", "issue": "Admin can also create a request (returns 200). The brief says manager-only. No email is sent for admin requests, so this is harmless but inconsistent."},
+      {"endpoint": "POST /api/restaurants/pin-request", "issue": "No rate limit. A manager can send repeated requests, and each one emails the admin (send_pin_request_email)."},
+      {"endpoint": "POST /api/restaurants/manage/{rid}/image/{kind}", "issue": "Type is checked by file extension only; the bytes are not checked. PNG bytes uploaded as .webp/.jpg are accepted and served with the wrong Content-Type. Admin-only, so low risk."},
+      {"endpoint": "DELETE /api/restaurants/manage/{rid}/image/{kind}", "issue": "No audit log entry. Upload does write one ('Logo yükledi')."},
+      {"endpoint": "send_daily_report", "issue": "Per-restaurant emails run only after the main send_report_email succeeds. If the main email fails, no restaurant gets its summary. Per-restaurant sends also leave no report_deliveries record, so failures are only in the logs."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PinGate with cover", "issues": ["The cover image sits inside the panel padding instead of reaching the card edges, so its top corners don't follow the card's rounded corners. It looks slightly inset.", "Before the logo loads, an empty white rounded box shows for a moment (no placeholder)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration25_restaurant_images_pin_requests.py", "/app/backend/tests/test_iteration24_restaurant_admin_pin.py", "/app/backend/tests/it25_finalize.py", "/app/test_reports/pytest/pytest_it25.xml", "/app/test_reports/pytest/pytest_it24_regress.xml"],
+  "action_items": [
+    "Optional: limit /restaurants/pin-request to managers, or document that admins may use it",
+    "Optional: throttle pin-request (e.g. 1 per restaurant per few minutes) to avoid spamming the admin with emails",
+    "Optional: check image magic bytes on restaurant image upload",
+    "Optional: send per-restaurant daily emails even if the main report email fails, and record each delivery",
+    "Optional: make the PinGate cover reach the card edges"
+  ],
+  "critical_code_review_comments": [
+    "decide_pin_request approves even if the restaurant was archived meanwhile. Harmless, but approval could check rest.DOCS.",
+    "The list of pending requests correctly leaves out pin_hash. Approving changes pin_hash, which invalidates existing unlock tokens (verified: old token returns 423).",
+    "A new request from the same restaurant marks the previous pending one as 'replaced' (verified: only 1 pending).",
+    "test-sube restaurant email is @example.com. If it were active at night, the per-restaurant report would try to send there. It is archived now."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration25_restaurant_images_pin_requests.py (new)", "/app/backend/tests/it25_finalize.py (new)", "/app/backend/tests/test_iteration24_restaurant_admin_pin.py (summary test updated to the new locked:true behaviour)"],
+  "success_rate": {"backend": "100% (33/33 incl. regression)", "frontend": "100%"},
+  "seed_data_creation": "TEST_ restaurants created by the tests (test-logo-sube plus two TEST_Bakırköy restaurants from the it24 rerun) were archived. There is no hard-delete endpoint, so they stay in the archive list. test-sube: PIN 5678, logo kept, UI-uploaded cover removed, ARCHIVED. The 3 real restaurants have no logo or cover and were not touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test-sube is ARCHIVED with PIN 5678 and its red logo; restore it before testing. Run the it25 tests with -n 0 (ordered). Their teardown resets the PIN to 5678 but does not archive test-sube. Manager UI: python3 tests/clerk_ticket.py <email>. GMAIL_* env is not set in preview, so emails fail silently (logged).",
+  "rca of the issue": ""
+}

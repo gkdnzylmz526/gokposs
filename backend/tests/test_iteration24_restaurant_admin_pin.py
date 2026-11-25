@@ -83,10 +83,11 @@ def test_all_mode_needs_all_pins():
 
 
 def test_summary_hides_locked_restaurants():
-    no_key = {r["id"] for r in adm(FL).get(f"{BASE}/restaurants/summary").json()}
-    assert TS not in no_key and FL in no_key
-    with_key = {r["id"] for r in adm(FL, S["ts_key"]).get(f"{BASE}/restaurants/summary").json()}
-    assert TS in with_key
+    # since iteration 25 locked restaurants are listed as {"locked": True} without figures
+    no_key = {r["id"]: r for r in adm(FL).get(f"{BASE}/restaurants/summary").json()}
+    assert no_key[TS].get("locked") is True and "today_revenue" not in no_key[TS] and "today_revenue" in no_key[FL]
+    with_key = {r["id"]: r for r in adm(FL, S["ts_key"]).get(f"{BASE}/restaurants/summary").json()}
+    assert not with_key[TS].get("locked") and "today_revenue" in with_key[TS]
 
 
 # --- create / validation ---
