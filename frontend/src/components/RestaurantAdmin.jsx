@@ -44,6 +44,8 @@ function RestaurantRow({ r, onEdit, onToggle }) {
 export const RestaurantAdmin = ({ onChanged }) => {
   const [rows, setRows] = useState([]);
   const [editing, setEditing] = useState(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const archived = rows.filter((r) => r.archived);
   const load = () => axios.get(`${API}/restaurants/manage`).then(({ data }) => setRows(data)).catch(() => toast.error("Restoranlar yüklenemedi"));
   useEffect(() => { load(); }, []);
   const done = () => { setEditing(null); load(); onChanged(); };
@@ -56,7 +58,9 @@ export const RestaurantAdmin = ({ onChanged }) => {
     <section className="panel rest-admin" data-testid="restaurant-admin">
       <div className="panel-head"><div><h3>Restoranlar</h3><span className="muted">Ekle, sil, şifre ve restoran e-postası belirle</span></div>{editing === null && <button className="primary-button" onClick={() => setEditing("new")} data-testid="restaurant-add-button"><Plus size={15} /> Restoran ekle</button>}</div>
       {editing && <RestaurantForm item={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={done} />}
-      {rows.map((r) => <RestaurantRow key={r.id} r={r} onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />)}
+      {rows.filter((r) => !r.archived).map((r) => <RestaurantRow key={r.id} r={r} onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />)}
+      {archived.length > 0 && <button className="text-button rest-archive-toggle" onClick={() => setShowArchive(!showArchive)} data-testid="restaurant-archive-toggle"><Archive size={14} /> Arşiv ({archived.length}) {showArchive ? "gizle" : "göster"}</button>}
+      {showArchive && archived.map((r) => <RestaurantRow key={r.id} r={r} onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />)}
     </section>
   );
 };

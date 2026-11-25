@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 24: tested adding, editing and archiving restaurants, the per-restaurant PIN and the manager role. New pytest suite tests/test_iteration24_restaurant_admin_pin.py: 19/19 pass after 2 small backend fixes made by the testing agent. UI tested with Playwright as admin and as manager. Admin: panel lists restaurants; add (name+PIN) shows the new restaurant in the switcher; PinGate appears, wrong PIN shows a toast, correct PIN opens the dashboard; switching away and back asks for the PIN again; 'Tüm restoranlar' asks for all PINs; edit name and clear PIN work; archive (confirm dialog) removes it from the switcher and greys the row, 'Geri al' restores it; the role select includes 'Restoran müdürü'; Ciro Girişi and restaurants without a PIN still work. Manager (member account): only Test Şube shown, no switcher, no Kullanıcılar nav, PinGate first, wrong PIN toast, 5678 opens the dashboard, PIN asked again after reload, /api/users and the other admin routes return 403, unlocking another restaurant returns 403, the admin's token is rejected for the manager.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/restaurants/unlock with X-Restaurant: all", "issue": "FIXED by testing agent. Returned 400 'Bu işlem için üstten bir restoran seçin' because ALL_MODE_WRITES did not include restaurants/unlock, so the 'Tüm restoranlar' PIN gate could never be unlocked. POST/PATCH /restaurants/manage* in all mode was blocked the same way. restaurants/unlock and restaurants/manage were added to ALL_MODE_WRITES.", "priority": "HIGH"},
+      {"endpoint": "GET /api/users, /api/audit-logs, /api/settings while the selected restaurant is locked", "issue": "FIXED by testing agent. The frontend lets the admin open Kullanıcılar while the PIN gate is up, but the backend returned 423, so the page showed 'Kullanıcılar yüklenemedi' with empty user and audit tables. These global admin-only routes were added to PIN_FREE.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PATCH /api/users/{id}/assignment", "issue": "Can move a manager to another restaurant_id (seen while legacy it17 ran), which does not match the restaurant's own email. Consider blocking it for role=manager, or syncing the restaurant email."},
+      {"endpoint": "POST /api/restaurants/manage/{rid}/archive", "issue": "The 'last active restaurant' 409 was NOT run live: it would mean archiving the real seed restaurants. Only checked by code review (len(RESTAURANT_IDS) <= 1). Needs a manual check."},
+      {"endpoint": "dashboard_guard", "issue": "rest.refresh() reads the whole restaurants collection from Mongo on every /api request (and twice on /api/me). This could be cached and invalidated on writes."},
+      {"endpoint": "restaurants.throttle/_fails", "issue": "The brute-force counter is in memory per process, so it resets on restart and is not shared between workers."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Kullanıcılar > Restoranlar", "issues": ["Archived restaurants stay in the list forever and there is no permanent delete, so the list grows (it already holds 7 archived TEST_ rows from tests). Consider collapsing archived rows under an 'Arşiv' toggle.", "Düzenle/Sil buttons show the icon stacked above the text instead of inline; looks cramped"]},
+      {"screen": "Genel Bakış (single restaurant)", "issues": ["The restaurant summary cards silently leave out locked restaurants (e.g. Test Şube) with no 'kilitli' hint"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration24_restaurant_admin_pin.py", "/app/test_reports/pytest/pytest_it24.xml"],
+  "action_items": [
+    "Review the 2 backend fixes made by the testing agent in server.py: ALL_MODE_WRITES now includes restaurants/unlock|restaurants/manage; PIN_FREE now includes users, audit-logs, settings",
+    "Update legacy test suites that now fail by design: it17/21/22 use X-Restaurant: all (now 423 because test-sube is pinned; send X-Restaurant-Key from /restaurants/unlock); it14/22/23/17 assume the member account has role 'member' (it is now 'manager'); it14/it17 expect a restaurant list of exactly 3 / roles ['admin','member']",
+    "Teardowns in tests 15/18/19 also PATCH the member role; check that they restore 'manager' (it14 was patched to restore the original role)",
+    "Optional: block or sync PATCH /users/{id}/assignment for managers; hide or collapse archived restaurants; cache the restaurant registry"
+  ],
+  "critical_code_review_comments": [
+    "ALL_MODE_WRITES / PIN_FREE regexes were missing the new restaurant routes; the frontend's 'users page bypasses PinGate' needed PIN-free backend routes (both fixed)",
+    "make_token signs over the pin_hash values, so changing a PIN invalidates old tokens (verified). A token for {test-sube} covers 'all' only until another restaurant gets a PIN (verified: 423 after a new pinned restaurant is added, which is correct)",
+    "unlock accepts restaurants without a PIN in pins{} with any value; harmless",
+    "_link_email demotes the old email's manager to 'member' when a restaurant's email changes. A manager whose restaurant is archived gets 403 'Restoranınız arşivlenmiş' (code-reviewed only)"
+  ],
+  "updated_files": ["/app/backend/server.py", "/app/backend/tests/test_iteration24_restaurant_admin_pin.py", "/app/backend/tests/test_iteration14_auth_roles.py"],
+  "success_rate": {"backend": "100% (19/19) after fixes; 2 bugs found and fixed", "frontend": "100% of requested flows after the backend fixes"},
+  "seed_data_creation": "Created restaurants (no hard delete exists, all left ARCHIVED): test-bakirkoy-sube, -2, -3, -4, -5, -6, test-ui-sube. test-sube left unchanged (PIN 5678, email gokboss-member+clerk_test@example.com). Running legacy suite it14 demoted the member account to 'member'; restored to role=manager, restaurant_id=test-sube, then verified via /api/me.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run tests/test_iteration24_restaurant_admin_pin.py with -n 0 (ordered). It creates TEST_Bakırköy restaurants and archives them on teardown. Each run records 1 wrong PIN for admin and 1 for manager (throttle allows 5 within 5 min). Legacy suites 14/17/21/22/23 fail by design because test-sube is pinned and member=manager; also check that running them keeps the member as manager (tests 15/18/19 PATCH role too). UI tickets: python3 tests/clerk_ticket.py <email>; the switcher is a native <select> (restaurant-select); the archive button uses window.confirm (accept the dialog)."
+}

@@ -113,15 +113,16 @@ class TestUsers:
 
     def test_promote_and_demote_member(self, admin_auth, member_auth):
         h = bearer(admin_auth[1])
+        orig = requests.get(f"{API}/me", headers=bearer(member_auth[1])).json()["role"]  # it24: member may be 'manager' of test-sube
         try:
             r = requests.patch(f"{API}/users/{member_auth[0]}/role", json={"role": "admin"}, headers=h)
             assert r.status_code == 200 and r.json()["role"] == "admin"
             assert requests.get(f"{API}/me", headers=bearer(member_auth[1])).json()["role"] == "admin"
             assert requests.get(f"{API}/dashboard", headers=bearer(member_auth[1])).status_code == 200
         finally:
-            r = requests.patch(f"{API}/users/{member_auth[0]}/role", json={"role": "member"}, headers=h)
+            r = requests.patch(f"{API}/users/{member_auth[0]}/role", json={"role": orig}, headers=h)
         assert r.status_code == 200
-        assert requests.get(f"{API}/dashboard", headers=bearer(member_auth[1])).status_code == 403
+        assert requests.get(f"{API}/dashboard", headers=bearer(member_auth[1])).status_code in (403, 423)
 
     def test_demote_last_admin_409(self, admin_auth):
         users = requests.get(f"{API}/users", headers=bearer(admin_auth[1])).json()["users"]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Store } from "lucide-react";
+import { Lock, Store } from "lucide-react";
 import { RESTAURANTS } from "@/lib/restaurant";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -26,7 +26,13 @@ export const RestaurantSummary = ({ refreshKey, active, onPick }) => {
   if (!rows.length) return null;
   return (
     <section className="restaurant-summary" data-testid="restaurant-summary">
-      {rows.map((r) => (
+      {rows.map((r) => r.locked ? (
+        <button key={r.id} className={`restaurant-card locked ${active === r.id ? "active" : ""}`} data-testid={`restaurant-card-${r.id}`} onClick={() => onPick(r.id)}>
+          <span className="eyebrow">{r.name.toLocaleUpperCase("tr-TR")}</span>
+          <strong><Lock size={18} /> Kilitli</strong>
+          <small>Rakamları görmek için tıklayıp şifreyi girin</small>
+        </button>
+      ) : (
         <button key={r.id} className={`restaurant-card ${active === r.id ? "active" : ""}`} data-testid={`restaurant-card-${r.id}`} onClick={() => onPick(r.id)}>
           <span className="eyebrow">{r.name.toLocaleUpperCase("tr-TR")}</span>
           <strong data-testid={`restaurant-today-${r.id}`}>{money(r.today_revenue)}</strong>

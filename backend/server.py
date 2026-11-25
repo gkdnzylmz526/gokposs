@@ -88,8 +88,8 @@ STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r
                 ("POST", r"/api/tables/[\w-]+/(items|close|cancel|pay)"), ("POST", r"/api/tables/[\w-]+/pending/[\w-]+/remove"),
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
 ADMIN_ONLY = r"/api/(users|settings|audit-logs|email|restaurants/manage)(/.*)?"
-PIN_FREE = r"/api/restaurants/(unlock|manage(/.*)?)"
-ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead)(/.*)?|/api/staff/[\w-]+/request-link"
+PIN_FREE = r"/api/(restaurants/(unlock|manage(/.*)?)|users(/.*)?|audit-logs|settings(/.*)?)"
+ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -569,6 +569,9 @@ class AssignmentIn(BaseModel):
 async def set_assignment(user_id: str, body: AssignmentIn, request: Request):
     if body.restaurant_id not in RESTAURANT_IDS:
         raise HTTPException(status_code=422, detail="Geçersiz restoran")
+    target = await db.users.find_one({"user_id": user_id, **IN_ENV}, {"_id": 0, "role": 1, "restaurant_id": 1})
+    if target and target.get("role") == "manager" and target.get("restaurant_id") != body.restaurant_id:
+        raise HTTPException(status_code=409, detail="Restoran müdürü, restoranın e-postasıyla bağlanır. Restoranlar bölümünden e-postayı değiştirin")
     if body.staff_id and not await db.raw.staff.find_one({"id": body.staff_id, "restaurant_id": body.restaurant_id}):
         raise HTTPException(status_code=422, detail="Personel bu restorana ait değil")
     result = await db.users.update_one({"user_id": user_id, **IN_ENV}, {"$set": {"restaurant_id": body.restaurant_id, "staff_id": body.staff_id}})
@@ -1563,7 +1566,10 @@ async def restaurants_summary(request: Request):
         return []
     opened = rest.unlocked(member["user_id"], request.headers.get("x-restaurant-key"))
     rows = []
-    for r in [r for r in RESTAURANTS if not r["has_pin"] or r["id"] in opened]:
+    for r in RESTAURANTS:
+        if r["has_pin"] and r["id"] not in opened:
+            rows.append({**r, "locked": True})
+            continue
         token = current_rid.set(r["id"])
         try:
             today, month = await build_report("daily"), await build_report("monthly")

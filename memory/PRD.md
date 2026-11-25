@@ -186,3 +186,7 @@
 ## 2026-11-25
 - QR menu hero photo replaced with user's Etiler Marmaris storefront photo (public asset).
 - New "Ciro Girişi" sidebar tab (components/RevenueEntry.jsx): manual daily revenue form (Nakit, Kart, Yemek kartı, Havale, Yemeksepeti, Getir, Trendyol) -> saves to incomes; day-grouped list with delete. Self-tested via screenshot.
+- Restaurants now in DB (`restaurants` collection, seeded with 3). Admin (Kullanıcılar > Restoranlar): add, edit name/email/PIN, delete = archive (data kept) + restore via Arşiv toggle.
+- Per-restaurant 4-6 digit PIN asked every time a restaurant is opened (admin too); "Tüm restoranlar" asks all PINs. Token header X-Restaurant-Key (HMAC, 12h, invalid after PIN change). 5 wrong tries -> 5 min lock.
+- Restaurant email -> user signing in with that verified email becomes role `manager`: sees only that restaurant, no Kullanıcılar/settings/users/audit/overhead edit.
+- Overview shows locked restaurants as "Kilitli" cards. Tested iteration_24 (19/19 backend, frontend flows 100%).

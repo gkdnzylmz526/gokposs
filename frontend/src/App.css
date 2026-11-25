@@ -244,3 +244,6 @@
 .rest-form input:not([type=checkbox]) { height: 42px; border: 1px solid #e3ded6; border-radius: 10px; padding: 0 12px; font-size: 14px; }
 .rest-check { display: flex !important; align-items: center; gap: 8px; }
 .rest-form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; }
+.rest-row .text-button, .rest-archive-toggle { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.rest-archive-toggle { margin-top: 12px; }
+.restaurant-card.locked strong { display: flex; align-items: center; gap: 8px; color: #8a8378; }
