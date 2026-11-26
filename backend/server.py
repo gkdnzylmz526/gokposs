@@ -90,7 +90,7 @@ STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
 ADMIN_ONLY = r"/api/(users|settings|audit-logs|email|restaurants/manage)(/.*)?"
 PIN_FREE = r"/api/(restaurants/(unlock|pin-request|manage(/.*)?)|users(/.*)?|audit-logs|settings(/.*)?)"
-ALL_MODE_WRITES = r"/api/(products|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/pin-request|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
+ALL_MODE_WRITES = r"/api/(products|menu-order|ai/chat|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/pin-request|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -684,7 +684,7 @@ async def ai_history(session_id: str, request: Request):
 
 @api.post("/public/menu-chat")
 async def menu_chat(body: ChatIn, request: Request):
-    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[0].strip()
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[-1].strip()
     if ai.rate_limited(f"ip:{ip}", 15, 600) or ai.rate_limited("menu:all", 400, 3600):
         raise HTTPException(status_code=429, detail="Çok fazla mesaj gönderildi, lütfen biraz sonra tekrar deneyin")
     menu = await public_menu()

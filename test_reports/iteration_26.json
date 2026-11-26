@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 26: tested the AI assistant (admin chat + QR menu chat), manual menu ordering, and the QR welcome text. Backend: 13/13 pytest passed. Admin /api/ai/chat returns 401/403 without auth and 422 on bad input. It returns 423 for a PIN-locked restaurant (admin and manager). It streams SSE 'data: {delta}' lines and ends with {done:true}. It remembers the previous turn ('az önce ne sordum?' was answered correctly). History is persisted and scoped to the owner. A manager is scoped to their own restaurant even when they send X-Restaurant=florya. Public menu chat answers from the menu ('Adana 530 TL'). The rate limit gave 429 on the 16th message. PUT /api/menu-order changes the order of categories and products in /api/public/menu. Frontend: the admin chat FAB, 4 suggestion chips, the typed follow-up, history after close/reopen, reset and close all work. The FAB is hidden while the PIN gate is locked. The menu-order modal works: up/down disabled at the ends, the up arrow, category drag&drop, expanding a category, product down/drag. Save showed a toast, the QR menu shows the new order, and the product wizard banner still opens. QR menu: welcome text in Great Vibes, hidden after a category is opened, shown again after Back. Tabs and menu chat work. ONE UI BUG FOUND AND FIXED: the welcome text rendered at 11px in #fbbf24 instead of the script size.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/public/menu-chat", "issue": "The per-IP rate-limit key is the first entry of the client-supplied X-Forwarded-For header, so it can be spoofed. Proven: a spoofed IP had its own 15-message counter. Anyone can bypass the 15/10min limit by rotating the header. Only the global 400/hour cap remains, and one abuser can use that up and block all real customers. Use the right-most/ingress-appended IP or request.client.host behind a trusted proxy."},
+      {"endpoint": "PUT /api/menu-order", "issue": "Returns 400 'Bu işlem için üstten bir restoran seçin' in 'all' (Tüm restoranlar) mode, but products and the menu are global. Add /api/menu-order to ALL_MODE_WRITES, or hide/disable the 'Menü sırasını düzenle' button in all mode (right now the user only sees an error toast after reordering)."},
+      {"endpoint": "rate limiter (ai.rate_limited)", "issue": "In-memory per-process dict. It resets on restart, is not shared between workers, and grows without bound (one key per IP/user is never evicted)."},
+      {"endpoint": "GET /api/ai/history", "issue": "Not filtered by restaurant_id. After switching restaurants the old conversation is still shown, while the AI context is now the new restaurant's data, which can give confusing answers. Consider resetting the session when the restaurant changes, or filtering by restaurant."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "MenuPage welcome text", "issue": "FIXED by testing agent. '.qr-menu header p' (specificity 0,1,2) overrode '.qr-welcome' font-size/color, so 'Restoranımıza hoş geldiniz' rendered at 11px #fbbf24 and was barely visible. Added font-size: clamp(30px,8vw,44px) and color #f6d48b to '.qr-hero-text .qr-welcome'. Verified it now renders at 31px, #f6d48b.", "selector": "[data-testid='menu-welcome']", "priority": "HIGH (fixed)"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "QR menu chat (mobile)", "issues": ["The menu chat has no reset/new-conversation button. Fine by spec, but the session persists in localStorage forever, so on a shared/table device the next customer sees context carried over in the AI's memory."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration26_ai_menu_order.py", "/app/backend/tests/ui_setup_it26.py", "/app/test_reports/pytest/pytest_it26.xml"],
+  "action_items": [
+    "Fix the X-Forwarded-For spoofable rate-limit key for /api/public/menu-chat",
+    "Allow PUT /api/menu-order in 'all' mode (add to ALL_MODE_WRITES) or hide the button there",
+    "Optional: clear or filter the admin AI history when the restaurant changes"
+  ],
+  "critical_code_review_comments": [
+    "ai.py stream_answer: if the client disconnects mid-stream, nothing is persisted, which is OK. But a stream that ends without a 'done' event is not flagged as an error in aiStream.js, so the user sees a truncated answer silently.",
+    "server.py save_menu_order: one update_one per product in a loop. Use bulk_write for large menus. Product ids are not checked for existence (harmless).",
+    "server.py is 2280+ lines. Should be split into modules (AI/menu routes could go in their own router).",
+    "MenuPage.jsx: in onTouchEnd, 'cats' is used before its declaration line. It works at runtime because it runs later, but it is fragile."
+  ],
+  "updated_files": ["/app/frontend/src/App.css", "/app/backend/tests/test_iteration26_ai_menu_order.py", "/app/backend/tests/ui_setup_it26.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% after the CSS fix (1 bug fixed)"},
+  "seed_data_creation": "Created TEST_A1/A2/B1/B2 and TEST_UI_A1/A2/B1 products and deleted all of them by id. Restored the menu order state: deleted the settings doc {id:'menu_order'} (it did not exist before) and unset sort_order on 'adana'. The public menu is back to Kebap/adana only. test-sube was restored during the tests and archived again. Chat messages from the tests remain in ai_messages/menu_chat (TEST_ session ids, owner-scoped, harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest tests/test_iteration26_ai_menu_order.py -n 0 -v -s (about 6 real LLM calls plus 15 aborted streams for the rate-limit test). It restores/archives test-sube itself and cleans up the menu order. UI helper: python3 tests/ui_setup_it26.py create|cleanup. Admin AI FAB: ai-assistant-button. Menu order: nav-products -> open-menu-order. HTML5 drag works with page.drag_and_drop on '.sort-grip' -> '.sort-label'. With test-sube restored, 'all' mode is PIN-locked."
+}

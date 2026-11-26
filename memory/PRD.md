@@ -195,3 +195,6 @@
 - Nightly daily report also sends per-restaurant summary to each restaurant's email. Tested iteration_25 (33/33 backend, frontend 100%).
 - Restaurant manager name + phone (Restoranlar form); WhatsApp button (wa.me, TR normalization via lib/phone.js).
 - Missing revenue alert: cron `missing-revenue` 23:00 Europe/Istanbul -> /api/cron/missing-revenue; restaurants with 0 revenue today get an email to the restaurant email (fallback REPORT_RECIPIENT). 5/5 crons now used. Self-tested (curl + mocked send + screenshot).
+- AI assistant (GPT 6 Luna `gpt-6-luna` via EMERGENT_LLM_KEY, backend/ai.py): admin floating "Asistana sor" chat (SSE streaming, per-restaurant session, history in `ai_messages`, context = reports/expenses/stock/product costs of selected restaurant). Public QR "Menüye sor" chat (`/api/public/menu-chat`, menu-only context, 15 msg/10min/IP + 400/h global, history in `menu_chat`).
+- Manual menu order: Menü Ürünleri > "Menü sırasını düzenle" modal (drag&drop + arrows) -> PUT /api/menu-order (settings.menu_order categories + products.sort_order); public menu follows order.
+- QR entry screen: "Restoranımıza hoş geldiniz" in Great Vibes script. Tested iteration_26 (13/13 backend, frontend 100%); follow-up fixes: XFF right-most IP, menu-order/ai chat allowed in all-mode, AI session per restaurant, menu chat reset button.

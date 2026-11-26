@@ -32,6 +32,9 @@ _hits: Dict[str, List[float]] = {}
 
 def rate_limited(key: str, limit: int, window: int) -> bool:
     now = time.time()
+    if len(_hits) > 5000:
+        for k in [k for k, v in _hits.items() if not v or now - v[-1] > 3600]:
+            _hits.pop(k, None)
     hits = [t for t in _hits.get(key, []) if now - t < window]
     _hits[key] = hits + [now]
     return len(hits) >= limit

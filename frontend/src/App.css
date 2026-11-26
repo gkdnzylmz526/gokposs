@@ -332,7 +332,7 @@
 .sort-cat svg { transition: transform .2s; }
 .sort-children { display: grid; gap: 6px; padding: 0 10px 10px 34px; }
 .sort-children .sort-label { font-weight: 500; }
-.qr-hero-text .qr-welcome { text-transform: none; letter-spacing: 0; font-weight: 400; margin-bottom: 14px; display: block; }
+.qr-hero-text .qr-welcome { text-transform: none; letter-spacing: 0; font-weight: 400; margin-bottom: 14px; display: block; font-size: clamp(30px, 8vw, 44px); color: #f6d48b; }
 .chat-window { color: #1d2533; text-align: left; font-family: "Plus Jakarta Sans", sans-serif; }
 .chat-msg.assistant { color: #1d2533; }
 .chat-head { color: #fff; }

@@ -7,10 +7,10 @@ import { ChatWindow, streamChat, useChatSession } from "@/components/ChatWindow"
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const SUGGESTIONS = ["Bu ay kârım ne durumda?", "En çok hangi giderim var?", "Maliyeti en yüksek ürünüm hangisi?", "Kritik stokta neler var?"];
 
-export const AiAssistant = ({ restaurantKey }) => {
+export const AiAssistant = ({ rid, restaurantKey }) => {
   const { getToken } = useAuth();
   const [open, setOpen] = useState(false);
-  const [sid, reset] = useChatSession("gokboss-ai-session");
+  const [sid, reset] = useChatSession(`gokboss-ai-session-${rid}`);
   const [initial, setInitial] = useState([]);
   useEffect(() => { if (open) axios.get(`${API}/ai/history`, { params: { session_id: sid } }).then(({ data }) => setInitial(data)).catch(() => setInitial([])); }, [open, sid, restaurantKey]);
   const send = async (message, onDelta) => {
