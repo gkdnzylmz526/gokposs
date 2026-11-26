@@ -11,7 +11,7 @@ from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMe
 MODEL = ("openai", "gpt-6-luna")
 HISTORY_TURNS = 12
 
-ADMIN_PROMPT = """Sen GÖKBOSS POS'un işletme asistanısın. Restoran sahibine Türkçe, kısa ve net cevap ver.
+ADMIN_PROMPT = """Sen GÖKPOS'un işletme asistanısın. Restoran sahibine Türkçe, kısa ve net cevap ver.
 Sadece aşağıdaki VERİ'ye dayan; veride olmayan bir rakamı uydurma, yoksa "bu bilgi panelde yok" de.
 Para birimi Türk lirasıdır (₺). Gerekirse kısa maddeler ve basit hesaplar kullan, öneri istenirse pratik öneriler ver.
 Bugünün tarihi: {today}. Seçili restoran: {restaurant}.

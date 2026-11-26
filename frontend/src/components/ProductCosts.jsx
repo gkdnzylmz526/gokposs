@@ -17,13 +17,13 @@ const card = (p, restaurants) => `<section class="card"><header><div><small>${es
 const printCards = (products, restaurants) => {
   const w = window.open("", "_blank");
   if (!w) return;
-  w.document.write(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>GÖKBOSS POS · Maliyet kartları</title><style>
+  w.document.write(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>GÖKPOS · Maliyet kartları</title><style>
 body{font-family:Arial,Helvetica,sans-serif;color:#1e293b;margin:24px}h1{font-size:14px;letter-spacing:2px;color:#b45309;margin:0 0 4px}.meta{font-size:11px;color:#64748b;margin-bottom:18px}
 .card{border:1px solid #cbd5e1;border-radius:8px;padding:16px 18px;margin-bottom:16px;page-break-inside:avoid}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e293b;padding-bottom:8px;margin-bottom:10px}
 header small{font-size:10px;text-transform:uppercase;color:#64748b;letter-spacing:1px}h2{margin:2px 0 0;font-size:20px}.price{font-size:20px;font-weight:bold;text-align:right}.price small{display:block;font-size:10px;font-weight:normal;color:#64748b}
 table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;font-size:10px;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;padding:5px 4px}td{padding:5px 4px;border-bottom:1px dashed #e2e8f0}td:last-child,th:last-child{text-align:right}
 tfoot td{font-weight:bold;border-bottom:none;border-top:1px solid #1e293b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.stats div{background:#f8fafc;border-radius:6px;padding:7px 9px}.stats small{display:block;font-size:9px;color:#64748b}.stats b{font-size:14px}
-.rest{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10px;color:#475569}@media print{body{margin:10mm}}</style></head><body><h1>GÖKBOSS POS · MALİYET KARTI</h1><div class="meta">${new Date().toLocaleString("tr-TR")} · Maliyetler güncel alış fiyatlarıyla hesaplanmıştır</div>${products.map((p) => card(p, restaurants)).join("")}<script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`);
+.rest{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10px;color:#475569}@media print{body{margin:10mm}}</style></head><body><h1>GÖKPOS · MALİYET KARTI</h1><div class="meta">${new Date().toLocaleString("tr-TR")} · Maliyetler güncel alış fiyatlarıyla hesaplanmıştır</div>${products.map((p) => card(p, restaurants)).join("")}<script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`);
   w.document.close();
 };
 

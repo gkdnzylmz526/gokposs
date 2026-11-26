@@ -71,7 +71,7 @@ export default function StaffApp({ me }) {
   return (
     <div className="staff-app" data-testid="staff-app">
       <Toaster position="top-center" richColors />
-      <header className="staff-header"><div className="brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span data-testid="staff-restaurant-name">{(me?.restaurant_name || "Personel").toLocaleUpperCase("tr-TR")}</span></div></div><UserButton /></header>
+      <header className="staff-header"><div className="brand"><div className="brand-mark">G</div><div><strong>GÖKPOS</strong><span data-testid="staff-restaurant-name">{(me?.restaurant_name || "Personel").toLocaleUpperCase("tr-TR")}</span></div></div><UserButton /></header>
       <div className="staff-clock-wrap"><ClockCard /></div>
       <nav className="staff-tabs">
         {sells && <button className={tab === "tables" ? "active" : ""} data-testid="staff-tab-tables" onClick={() => setTab("tables")}><Armchair size={16} /> Masalar</button>}

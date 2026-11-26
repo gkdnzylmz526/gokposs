@@ -26,7 +26,7 @@ export default function LeaveRequestPage({ token }) {
     <div className="public-page" data-testid="leave-request-page">
       <Toaster richColors position="top-center" />
       <div className="public-card">
-        <div className="brand public-brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span>İzin talebi</span></div></div>
+        <div className="brand public-brand"><div className="brand-mark">G</div><div><strong>GÖKPOS</strong><span>İzin talebi</span></div></div>
         {error ? <div className="empty-state" data-testid="leave-request-error">{error}</div> : !info ? <div className="empty-state">Yükleniyor…</div> : (
           <>
             <h1 data-testid="leave-request-name">Merhaba {info.name}</h1>

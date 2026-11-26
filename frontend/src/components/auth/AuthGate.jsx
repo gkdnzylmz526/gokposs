@@ -30,7 +30,7 @@ export const AuthGate = ({ children }) => {
   return (
     <div className="public-page" data-testid="access-denied">
       <div className="public-card">
-        <div className="brand public-brand"><div className="brand-mark">G</div><div><strong>GÖKBOSS POS</strong><span>Yönetim paneli</span></div></div>
+        <div className="brand public-brand"><div className="brand-mark">G</div><div><strong>GÖKPOS</strong><span>Yönetim paneli</span></div></div>
         <div className="denied-icon"><ShieldAlert size={26} /></div>
         <h1>Erişim yetkiniz yok</h1>
         <p className="muted">{user?.primaryEmailAddress?.emailAddress} hesabı bu panele yönetici olarak tanımlı değil. Restoran yöneticisinden size yetki vermesini isteyin.</p>

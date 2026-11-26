@@ -22,7 +22,7 @@ def low_stock_text(items: list) -> str:
 def _send(subject: str, body: str, attachment: tuple[bytes, str] | None = None, to: str | None = None) -> None:
     sender, password, recipient = os.environ["GMAIL_USERNAME"], os.environ["GMAIL_APP_PASSWORD"], to or os.environ["REPORT_RECIPIENT"]
     msg = EmailMessage()
-    msg["From"] = f"GÖKBOSS POS <{sender}>"
+    msg["From"] = f"GÖKPOS <{sender}>"
     msg["To"] = recipient
     msg["Subject"] = subject
     msg.set_content(body)
@@ -46,10 +46,10 @@ def send_report_email(pdf: bytes, report: dict, day: str) -> None:
     rec = report["reconciliation"]
     per = "\n\n".join(restaurant_text(r) for r in report.get("restaurants", []))
     _send(
-        f"GÖKBOSS POS — Gün sonu raporu {day}",
+        f"GÖKPOS — Gün sonu raporu {day}",
         f"Merhaba,\n\n{day} tarihli gün sonu raporunuz ektedir.\n\n"
         f"TÜM RESTORANLAR\nToplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])}\n"
-        f"Satış işlemi: {report['sales_count']}\nToplam kasa farkı: {tl(rec['difference'])}\n\n{per}\n\n{low_stock_text(report.get('low_stock', []))}\n\nGÖKBOSS POS",
+        f"Satış işlemi: {report['sales_count']}\nToplam kasa farkı: {tl(rec['difference'])}\n\n{per}\n\n{low_stock_text(report.get('low_stock', []))}\n\nGÖKPOS",
         (pdf, f"gokboss-pos-gun-sonu-{day}.pdf"),
     )
 
@@ -59,11 +59,11 @@ def send_weekly_email(report: dict, label: str, commentary: str = "") -> None:
     lines = [f"{i + 1}. {p['product_name']} — {qty(p['quantity'])} adet · ciro {tl(p['revenue'])} · kâr {tl(p['profit'])}" for i, p in enumerate(top)] or ["Bu hafta satış yok."]
     margin = round(report["profit"] / report["revenue"] * 100) if report["revenue"] else 0
     _send(
-        f"GÖKBOSS POS — Haftalık özet {label}",
+        f"GÖKPOS — Haftalık özet {label}",
         f"Merhaba,\n\nGeçen haftanın özeti ({label}):\n\n"
         f"Toplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])} (%{margin})\nSatış işlemi: {report['sales_count']}\n\n"
         + (f"YAPAY ZEKA YORUMU\n{'-' * 17}\n{commentary}\n\n" if commentary else "")
-        + "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi haftalar,\nGÖKBOSS POS",
+        + "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi haftalar,\nGÖKPOS",
     )
 
 
@@ -78,12 +78,12 @@ def send_monthly_email(report: dict, payroll: dict, month: str) -> None:
     t = payroll["totals"]
     net_after_payroll = report["profit"] - t["total_pay"]
     _send(
-        f"GÖKBOSS POS — Aylık özet {label}",
+        f"GÖKPOS — Aylık özet {label}",
         f"Merhaba,\n\n{label} özeti:\n\n"
         f"Toplam gelir: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nBrüt kâr: {tl(report['profit'])}\nSatış işlemi: {report['sales_count']}\n\n"
         f"Bordro (brüt): {tl(t['total_pay'])} · fazla mesai {qty(t['overtime_hours'])} saat · avans {tl(t['advance_total'])}\n"
         f"Bordro sonrası kâr (tahmini): {tl(net_after_payroll)}\n\n"
-        "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi çalışmalar,\nGÖKBOSS POS",
+        "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi çalışmalar,\nGÖKPOS",
     )
 
 
@@ -93,9 +93,9 @@ def send_leave_request_email(staff_name: str, doc: dict) -> None:
         return f"{day}.{m}.{y}"
     period = d(doc["start"]) if doc["start"] == doc["end"] else f"{d(doc['start'])} – {d(doc['end'])}"
     _send(
-        f"GÖKBOSS POS — Yeni izin talebi: {staff_name}",
+        f"GÖKPOS — Yeni izin talebi: {staff_name}",
         f"Merhaba,\n\n{staff_name} yeni bir izin talebi gönderdi.\n\nTarih: {period} ({doc['days']} gün)\nTür: {doc['type']}\n"
-        f"Not: {doc.get('note') or '—'}\n\nOnaylamak veya reddetmek için GÖKBOSS POS > Ekip & Vardiya > İzin talepleri bölümüne gidin.\n\nGÖKBOSS POS",
+        f"Not: {doc.get('note') or '—'}\n\nOnaylamak veya reddetmek için GÖKPOS > Ekip & Vardiya > İzin talepleri bölümüne gidin.\n\nGÖKPOS",
     )
 
 
@@ -103,23 +103,23 @@ def send_cash_reminder_email(rec: dict) -> None:
     y, m, d = rec["date"].split("-")
     pays = rec.get("payments", {})
     _send(
-        f"GÖKBOSS POS — {rec.get('restaurant', '')} kasa kapanışı girilmedi ({d}.{m}.{y})",
+        f"GÖKPOS — {rec.get('restaurant', '')} kasa kapanışı girilmedi ({d}.{m}.{y})",
         f"Merhaba,\n\n{rec.get('restaurant', 'Restoran')} için bugünün kasa kapanışı henüz girilmedi.\n\n"
         f"Bugünkü satış: {tl(rec['sales'])} (nakit {tl(pays.get('Nakit'))} · kart {tl(pays.get('Kart'))} · yemek kartı {tl(pays.get('Yemek kartı'))})\n"
         f"Bugünkü gider: {tl(rec['expenses'])}\nBeklenen kasa (nakit): {tl(rec['expected_closing'])}\n\n"
-        "Lütfen GÖKBOSS POS > Kasa bölümünden açılış ve kapanış tutarlarını girin.\n\nGÖKBOSS POS",
+        "Lütfen GÖKPOS > Kasa bölümünden açılış ve kapanış tutarlarını girin.\n\nGÖKPOS",
     )
 
 
 def send_restaurant_daily_email(r: dict, day: str, to: str) -> None:
-    _send(f"{r['name']} — Gün sonu özeti {day}", f"Merhaba,\n\n{day} tarihli {r['name']} gün sonu özetiniz:\n\n{restaurant_text(r)}\n\nGÖKBOSS POS", to=to)
+    _send(f"{r['name']} — Gün sonu özeti {day}", f"Merhaba,\n\n{day} tarihli {r['name']} gün sonu özetiniz:\n\n{restaurant_text(r)}\n\nGÖKPOS", to=to)
 
 
 def send_pin_request_email(restaurant: str, email: str) -> None:
-    _send(f"{restaurant} — şifre sıfırlama talebi", f"Merhaba,\n\n{email} hesabı {restaurant} için yeni şifre talep etti.\nOnaylamak için panelde Kullanıcılar > Restoranlar bölümüne gidin.\n\nGÖKBOSS POS")
+    _send(f"{restaurant} — şifre sıfırlama talebi", f"Merhaba,\n\n{email} hesabı {restaurant} için yeni şifre talep etti.\nOnaylamak için panelde Kullanıcılar > Restoranlar bölümüne gidin.\n\nGÖKPOS")
 
 
 def send_missing_revenue_email(name: str, day: str, to: str | None) -> None:
     _send(f"{name} — bugünün cirosu girilmedi ({day})",
           f"Merhaba,\n\n{name} için {day} tarihli ciro henüz girilmedi.\n\n"
-          "Lütfen GÖKBOSS POS > Ciro Girişi bölümünden POS'unuzdaki gün sonu tutarlarını girin.\n\nGÖKBOSS POS", to=to)
+          "Lütfen GÖKPOS > Ciro Girişi bölümünden POS'unuzdaki gün sonu tutarlarını girin.\n\nGÖKPOS", to=to)

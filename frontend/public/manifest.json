@@ -1,6 +1,6 @@
 {
-  "name": "GÖKBOSS POS",
-  "short_name": "GÖKBOSS",
+  "name": "GÖKPOS",
+  "short_name": "GÖKPOS",
   "description": "Restoran yönetim paneli: satış, stok, kasa, personel ve raporlar",
   "lang": "tr",
   "start_url": "/",

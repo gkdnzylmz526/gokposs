@@ -90,7 +90,7 @@ STAFF_ROUTES = [("GET", r"/api/staff-view"), ("POST", r"/api/sales"), ("POST", r
                 ("GET", r"/api/kitchen"), ("POST", r"/api/kitchen/[\w-]+/status"), ("GET", r"/api/attendance/me"), ("POST", r"/api/attendance/clock")]
 ADMIN_ONLY = r"/api/(users|settings|audit-logs|email|restaurants/manage)(/.*)?"
 PIN_FREE = r"/api/(restaurants/(unlock|pin-request|manage(/.*)?)|users(/.*)?|audit-logs|settings(/.*)?)"
-ALL_MODE_WRITES = r"/api/(products|menu-order|ai/chat|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/pin-request|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
+ALL_MODE_WRITES = r"/api/(products|menu-order|chef-pick|ai/chat|suppliers|users|email|price-alerts|leave-requests|settings|overhead|restaurants/unlock|restaurants/pin-request|restaurants/manage)(/.*)?|/api/staff/[\w-]+/request-link"
 
 def staff_allowed(method: str, path: str) -> bool:
     return any(method == m and re.fullmatch(p, path) for m, p in STAFF_ROUTES)
@@ -342,7 +342,7 @@ def _total(items) -> float:
 
 @api.get("/")
 async def root():
-    return {"message": "GÖKBOSS POS hazır"}
+    return {"message": "GÖKPOS hazır"}
 
 @api.get("/dashboard")
 async def dashboard():
@@ -628,17 +628,47 @@ async def staff_view(request: Request):
 @api.get("/public/menu")
 async def public_menu(lang: str = "tr"):
     cats = await menu_groups()
+    pick_doc = await db.settings.find_one({"id": "chef_pick"}, {"_id": 0}) or {}
+    spot = None
+    if pick_doc.get("date") == datetime.now(TZ).date().isoformat():
+        spot = next(((ci, ii) for ci, g in enumerate(cats) for ii, i in enumerate(g["items"]) if i["id"] == pick_doc.get("product_id")), None)
     for g in cats:
         g["items"] = [{k: i[k] for k in ("name", "price", "description", "tags", "photo_url")} for i in g["items"]]
-    if lang in ai.LANGS:
-        await translate_menu(cats, lang)
-    return {"name": "Florya Dürüm Tır", "lang": lang if lang in ai.LANGS else "tr", "categories": cats}
+    note = pick_doc.get("note", "") if spot else ""
+    known = await translate_menu(cats, lang, [note]) if lang in ai.LANGS else {}
+    pick = {**cats[spot[0]]["items"][spot[1]], "category_index": spot[0], "note": known.get(note, note)} if spot else None
+    return {"name": "Florya Dürüm Tır", "lang": lang if lang in ai.LANGS else "tr", "categories": cats, "chef_pick": pick}
+
+class ChefPickIn(BaseModel):
+    product_id: str
+    note: str = Field(default="", max_length=120)
+
+@api.get("/chef-pick")
+async def get_chef_pick():
+    doc = await db.settings.find_one({"id": "chef_pick"}, {"_id": 0}) or {}
+    return {"product_id": doc.get("product_id", ""), "note": doc.get("note", ""), "date": doc.get("date", ""), "today": doc.get("date") == datetime.now(TZ).date().isoformat()}
+
+@api.put("/chef-pick")
+async def set_chef_pick(body: ChefPickIn, request: Request):
+    product = await db.products.find_one({"id": body.product_id}, {"_id": 0, "name": 1, "active": 1})
+    if not product or product.get("active") is False:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı veya menüde pasif")
+    today = datetime.now(TZ).date().isoformat()
+    await db.settings.update_one({"id": "chef_pick"}, {"$set": {"id": "chef_pick", "product_id": body.product_id, "note": body.note.strip(), "date": today}}, upsert=True)
+    await audit(request, "Günün önerisini seçti", "products", body.product_id, detail=product["name"])
+    return {"product_id": body.product_id, "note": body.note.strip(), "date": today, "today": True}
+
+@api.delete("/chef-pick")
+async def clear_chef_pick(request: Request):
+    await db.settings.delete_one({"id": "chef_pick"})
+    await audit(request, "Günün önerisini kaldırdı", "products", None)
+    return {"ok": True}
 
 _translate_locks: Dict[str, asyncio.Lock] = {}
 
-async def translate_menu(cats: List[Dict[str, Any]], lang: str) -> None:
+async def translate_menu(cats: List[Dict[str, Any]], lang: str, extra: List[str] = ()) -> Dict[str, str]:
     """Swap menu texts for cached AI translations, translating only strings not seen before."""
-    texts = {t for g in cats for t in [g["category"], *[i["name"] for i in g["items"]], *[i["description"] for i in g["items"]]] if t and t.strip()}
+    texts = {t for g in cats for t in [g["category"], *[i["name"] for i in g["items"]], *[i["description"] for i in g["items"]]] if t and t.strip()} | {t for t in extra if t and t.strip()}
     async with _translate_locks.setdefault(lang, asyncio.Lock()):
         known = {d["src"]: d["text"] for d in await db.translations.find({"lang": lang, "src": {"$in": list(texts)}}, {"_id": 0}).to_list(None)}
         missing = sorted(texts - known.keys())
@@ -656,6 +686,7 @@ async def translate_menu(cats: List[Dict[str, Any]], lang: str) -> None:
         for it in g["items"]:
             it["name_original"] = it["name"]
             it["name"], it["description"] = known.get(it["name"], it["name"]), known.get(it["description"], it["description"])
+    return known
 
 async def menu_groups() -> List[Dict[str, Any]]:
     """Active products grouped by category ('kebap' and 'Kebap ' merge), in the owner's manual order."""
@@ -748,6 +779,8 @@ async def menu_chat(body: ChatIn, request: Request):
         raise HTTPException(status_code=429, detail="Çok fazla mesaj gönderildi, lütfen biraz sonra tekrar deneyin")
     menu = await public_menu()
     data = json.dumps([{"kategori": c["category"], "urunler": [{"ad": i["name"], "fiyat": i["price"], "aciklama": i["description"], "etiketler": i["tags"]} for i in c["items"]]} for c in menu["categories"]], ensure_ascii=False)
+    if menu.get("chef_pick"):
+        data += f"\nGÜNÜN ŞEF ÖNERİSİ: {menu['chef_pick']['name']} {menu['chef_pick']['note']}".rstrip()
     system = ai.MENU_PROMPT.format(name=menu["name"], data=data)
     return StreamingResponse(ai.stream_answer(db.raw.menu_chat, body.session_id, "public", system, body.message[:500]), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -2320,7 +2353,7 @@ def make_crud(name: str, model: type[BaseModel]):
 for collection_name, collection_model in COLLECTIONS.items():
     make_crud(collection_name, collection_model)
 
-app = FastAPI(title="GÖKBOSS POS API")
+app = FastAPI(title="GÖKPOS API")
 app.include_router(api)
 app.include_router(clerk_router)  # /api/clerk/config and /api/__clerk/*
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])

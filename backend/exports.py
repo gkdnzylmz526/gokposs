@@ -76,7 +76,7 @@ def build_excel(report: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Rapor"
-    ws.append([f"GÖKBOSS POS — {PERIOD_LABELS[report['period']]} Rapor"])
+    ws.append([f"GÖKPOS — {PERIOD_LABELS[report['period']]} Rapor"])
     ws["A1"].font = Font(size=14, bold=True)
     ws.append([f"Dönem: {report['start'][:10]} — {report['end'][:10]}"])
     for title, headers, rows in _sections(report):
@@ -121,13 +121,13 @@ def _fmt(header: str, value, is_kalem_money: bool):
 def build_pdf(report: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
-                            title="GÖKBOSS POS Rapor")
+                            title="GÖKPOS Rapor")
     title = ParagraphStyle("t", fontName="Sans-Bold", fontSize=18, leading=22)
     sub = ParagraphStyle("s", fontName="Sans", fontSize=10, textColor=colors.HexColor("#6B7280"), leading=14)
     h2 = ParagraphStyle("h", fontName="Sans-Bold", fontSize=12, textColor=colors.HexColor(f"#{AMBER}"), spaceBefore=10, spaceAfter=6)
     cell = ParagraphStyle("c", fontName="Sans", fontSize=8.5, leading=11)
     small = ParagraphStyle("cs", fontName="Sans", fontSize=6.5, leading=8.5)
-    story = [Paragraph(f"GÖKBOSS POS — {PERIOD_LABELS[report['period']]} Rapor", title),
+    story = [Paragraph(f"GÖKPOS — {PERIOD_LABELS[report['period']]} Rapor", title),
              Paragraph(f"Dönem: {report['start'][:10]} — {report['end'][:10]}", sub), Spacer(1, 6)]
     for name, headers, rows in _sections(report):
         story.append(Paragraph(name, h2))
@@ -153,7 +153,7 @@ def build_payroll_excel(data: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Maaş Özeti"
-    ws.append([f"GÖKBOSS POS — {data['month']} Maaş Raporu"])
+    ws.append([f"GÖKPOS — {data['month']} Maaş Raporu"])
     ws["A1"].font = Font(size=14, bold=True)
     ws.append([f"Haftalık {data['weekly_limit']} saati aşan çalışma fazla mesai sayılır (x{data['overtime_rate']})"])
     ws.append([])
@@ -220,7 +220,7 @@ def build_payslip_pdf(row: dict, data: dict) -> bytes:
         return t
 
     w = doc.width
-    story = [Paragraph("GÖKBOSS POS — Ücret Bordrosu", title), Paragraph(escape(f"{months[month.month - 1]} {month.year} · {row['name']}{' · ' + row['task'] if row.get('task') else ''}"), sub)]
+    story = [Paragraph("GÖKPOS — Ücret Bordrosu", title), Paragraph(escape(f"{months[month.month - 1]} {month.year} · {row['name']}{' · ' + row['task'] if row.get('task') else ''}"), sub)]
     story += [Paragraph("Çalışma özeti", h2), table([
         ["Vardiya sayısı", row["shift_count"]], ["Normal çalışma", f"{row['regular_hours']:g} saat"], ["Fazla mesai", f"{row['overtime_hours']:g} saat"],
         ["İzin günü", row["leave_days"]], ["Saatlik ücret", tl(row["hourly_wage"])]], [w * 0.65, w * 0.35])]

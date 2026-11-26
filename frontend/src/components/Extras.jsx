@@ -41,7 +41,7 @@ export const WasteLog = ({ items, onAdd, onDelete }) => (
 export const MenuQR = () => {
   const url = `${window.location.origin}/menu`;
   const copy = async () => { try { await navigator.clipboard.writeText(url); toast.success("Menü linki kopyalandı"); } catch { toast.error("Kopyalanamadı"); } };
-  const print = () => { const w = window.open("", "_blank"); w.document.write(`<html><head><title>GÖKBOSS QR Menü</title></head><body style="font-family:sans-serif;text-align:center;padding:40px">${document.getElementById("menu-qr").innerHTML}<h1 style="margin:16px 0 4px">GÖKBOSS</h1><p>Menümüzü görmek için QR kodu okutun</p></body></html>`); w.document.close(); w.print(); };
+  const print = () => { const w = window.open("", "_blank"); w.document.write(`<html><head><title>GÖKPOS QR Menü</title></head><body style="font-family:sans-serif;text-align:center;padding:40px">${document.getElementById("menu-qr").innerHTML}<h1 style="margin:16px 0 4px">GÖKPOS</h1><p>Menümüzü görmek için QR kodu okutun</p></body></html>`); w.document.close(); w.print(); };
   return (
     <section className="panel menu-qr" data-testid="menu-qr">
       <div id="menu-qr" className="qr-box"><QRCodeSVG value={url} size={150} /></div>

@@ -10,7 +10,7 @@ const money = (n) => new Intl.NumberFormat("tr-TR", { style: "currency", currenc
 
 const orderText = (group) => [
   `Merhaba${group.supplier !== "Tedarikçi belirtilmemiş" ? ` ${group.supplier}` : ""},`,
-  "GÖKBOSS POS sipariş listemiz:",
+  "GÖKPOS sipariş listemiz:",
   ...group.items.map((i) => `- ${i.name}: ${num(i.suggested)} ${i.unit}`),
   "Teşekkürler.",
 ].join("\n");
