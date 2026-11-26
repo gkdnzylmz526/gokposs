@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 27: tested Günün Önerisi (chef pick), QR menu tag filters and the GÖKPOS rename. Backend: 12/12 pytest passed. Covered PUT/GET/DELETE /api/chef-pick; PUT returns 404 for an unknown or inactive product and 422 when the note is over 120 chars. A pick with a stale date, or one whose product was deactivated, makes /api/public/menu return chef_pick null. The note is translated into EN (AI). Auth is enforced and mailer.py uses GÖKPOS. UI: in the admin Chef pick card, select, save, the 'Bugün QR menüde: TEST_Falafel' status, persistence after reload, and clear all work. On the QR /menu banner, name, note, price and tag icon show; tapping the banner opens the right category; label and note are translated in AR (RTL)/RU/EN. The filter bar works: vegetarian includes vegan, not_spicy excludes spicy, no_nuts excludes nuts, counts update, menu-no-match shows, the active filter toggles off and the bar stays in category view. Brand is GÖKPOS in the browser title, our auth-page brand, the dashboard sidebar and the leave page. One problem found: Clerk's sign-in card still says 'Continue to GÖKBOSS POS'. One bug found and fixed: dimmed category cards were not visibly dimmed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Sign-in (Clerk SignIn card)", "issue": "The Clerk card title reads 'Continue to GÖKBOSS POS'. It comes from the Clerk application name, not our code, and the user explicitly asked for GÖKPOS on the login screen. Clerk's own verification-code emails probably use the same old name (not checked).", "selector": ".cl-headerTitle", "priority": "HIGH"},
+      {"component": "QR menu CategoryGrid (FIXED by tester)", "issue": "`.qr-cat-card.dim {opacity:.4}` had no effect: the card's `animation: pop .35s both` keyframe ends at opacity:1 and overrides it. Changed it to `filter: opacity(.4)` and confirmed: cards with 0 items are now visibly dimmed.", "selector": "[data-testid^=menu-category-].dim", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin chef-pick-card", "issues": ["The 'Kaldır' clear button shows the X icon stacked above the text instead of inline (minor)."]},
+      {"screen": "QR menu", "issues": ["Item counts read '1 items' in EN (no singular form); this was there before this iteration.", "In AR the italic Playfair note and label look letter-separated or faint, because the font has no Arabic glyphs and falls back to another font (minor)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration27_chef_pick_filters.py", "/app/backend/tests/ui_setup_it27.py", "/app/test_reports/pytest/it27.xml"],
+  "action_items": [
+    "Change the brand on the Clerk SignIn/SignUp card: pass localization to <ClerkProvider> in components/auth/ClerkAuthProvider.jsx (e.g. signIn.start.title / signUp.start.title = 'GÖKPOS'), and/or rename the Clerk application to GÖKPOS so Clerk-sent emails match.",
+    "Optional: rename download filenames from 'gokboss-pos-*' to 'gokpos-*' (App.js downloadReport, PayrollReport.jsx, server.py export and payroll, mailer.py PDF attachment). Users can see these filenames.",
+    "Optional: show the 'Kaldır' clear button's icon inline with its text; add a singular form for EN item counts."
+  ],
+  "critical_code_review_comments": [
+    "The chef_pick setting is global (no restaurant scoping), same as the menu. That is fine while there is only one public menu, but it will need scoping if each branch gets its own menu.",
+    "When the chosen product is renamed, the pick still works because it is stored by id. When the product is deleted the pick silently disappears, which is correct, but the admin card then shows 'not selected' with no explanation.",
+    "MenuPage.jsx keeps every category while filtering, so category_index from the chef pick stays valid. Good."
+  ],
+  "updated_files": ["/app/frontend/src/App.css (.qr-cat-card.dim now uses filter: opacity(.4))", "/app/backend/tests/test_iteration27_chef_pick_filters.py", "/app/backend/tests/ui_setup_it27.py"],
+  "success_rate": {"backend": "100%", "frontend": "95% (Clerk sign-in title still shows the old brand)"},
+  "seed_data_creation": "Created TEST_Falafel, TEST_Acili Durum, TEST_Baklava and TEST_Pasif products and a chef pick. All were deleted by id and the chef pick was cleared. The DB again holds only 'adana' plus menu_order ['Kebap'], unchanged.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest tests/test_iteration27_chef_pick_filters.py -n 0 -v (1 cached AI translation call). UI helper: python3 tests/ui_setup_it27.py create|cleanup. Category grid cards: use the regex /menu-category-\\d+$/ because data-testid 'menu-category-tabs' also matches the prefix. Category names are translated in EN (e.g. TEST_Tatli becomes TEST_Dessert). menu-lang persists in localStorage."
+}

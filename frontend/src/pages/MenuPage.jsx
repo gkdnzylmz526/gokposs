@@ -42,7 +42,7 @@ function CategoryGrid({ categories, onPick, t }) {
       {categories.map((c, i) => (
         <button key={c.category} className={`qr-cat-card ${c.cover ? "has-cover" : ""} ${c.count ? "" : "dim"}`} data-testid={`menu-category-${i}`} style={{ animationDelay: `${i * 60}ms` }} onClick={() => onPick(i)}>
           {c.cover ? <img src={`${BASE}${c.cover}`} alt={c.category} loading="lazy" /> : <UtensilsCrossed size={26} />}
-          <span><b>{c.category}</b><small>{c.count} {t.items}</small></span>
+          <span><b>{c.category}</b><small>{c.count} {c.count === 1 && t.item ? t.item : t.items}</small></span>
         </button>
       ))}
     </div>

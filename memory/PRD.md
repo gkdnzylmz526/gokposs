@@ -202,3 +202,6 @@
 - Weekly AI commentary (ai.weekly_commentary, GPT 6 Luna) appended to Monday 09:00 weekly-summary email (no new cron); Raporlar page "Haftalık yapay zeka yorumu" card -> GET /api/ai/weekly-preview. Self-tested (curl + screenshots).
 - Sidebar brand renamed to "GÖKPOS" (visual edit; auth page still "GÖKBOSS POS").
 - Menu tags (product.tags: spicy, vegetarian, vegan, nuts, gluten_free, dairy) — chip picker in product edit modal (lib/menuTags.jsx), icons under each QR menu item + translated legend per category; tags passed to menu AI. Self-tested.
+- Brand renamed everywhere to GÖKPOS (UI, emails, exports, manifest, Clerk app name via clerk_init).
+- Chef's pick of the day: settings.chef_pick {product_id, note, date}; admin card in Menü Ürünleri (GET/PUT/DELETE /api/chef-pick); valid only for today (Istanbul); QR entry banner (translated), menu AI knows it.
+- QR tag filters (Tümü, Vejetaryen[incl. vegan], Vegan, Acısız, Glutensiz, Kuruyemişsiz) shown when any product has tags; counts update, empty categories dimmed. Tested iteration_27 (backend 12/12, frontend pass; Clerk title fixed after).

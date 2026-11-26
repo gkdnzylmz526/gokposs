@@ -364,7 +364,7 @@
 .qr-filters::-webkit-scrollbar { display: none; }
 .qr-filters button { flex-shrink: 0; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); color: #d1d5db; border-radius: 999px; padding: 7px 13px; font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color .2s, color .2s, border-color .2s; }
 .qr-filters button.active { background: #3a9e5c; border-color: #3a9e5c; color: #fff; }
-.qr-cat-card.dim { opacity: .4; }
+.qr-cat-card.dim { filter: opacity(.4); }
 .qr-no-match { color: #9ca3af; font-size: 14px; margin: 4px 0 10px; }
 .qr-chef-pick { display: flex; align-items: stretch; gap: 14px; width: calc(100% - 32px); margin: 0 16px 16px; padding: 0; text-align: start; border: 1px solid rgba(246,212,139,.45); border-radius: 20px; background: linear-gradient(120deg, rgba(246,212,139,.16), rgba(246,212,139,.04)); color: #fff; cursor: pointer; overflow: hidden; animation: chatIn .5s ease-out both; box-shadow: 0 10px 30px rgba(0,0,0,.25); transition: transform .2s; }
 .qr-chef-pick:hover { transform: translateY(-2px); }
@@ -387,3 +387,5 @@
 .chef-pick-form { display: grid; grid-template-columns: minmax(180px, 1fr) 2fr auto; gap: 10px; }
 .chef-pick-form select, .chef-pick-form input { height: 42px; border: 1px solid #e3ded6; border-radius: 10px; padding: 0 12px; font-size: 14px; background: #fff; min-width: 0; }
 @media (max-width: 760px) { .chef-pick-form { grid-template-columns: 1fr; } }
+.chef-pick-head .text-button { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.lang-ar .qr-chef-body em, .lang-ar .qr-chef-label { font-family: inherit; font-style: normal; }
