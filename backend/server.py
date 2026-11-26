@@ -479,12 +479,33 @@ async def send_daily_report(trigger: str, key: str | None = None) -> Dict[str, A
         await asyncio.to_thread(send_report_email, build_pdf(report), report, day)
     return await _deliver("daily", trigger, key, job)
 
+async def weekly_ai_commentary(start, end, report: Dict[str, Any]) -> str:
+    try:
+        prev = await build_report("custom", (start - timedelta(days=7)).isoformat(), (end - timedelta(days=7)).isoformat())
+        pick = lambda r: {k: r.get(k) for k in ("revenue", "expenses", "profit", "sales_count", "payments", "waste_cost")}
+        cats: Dict[str, float] = {}
+        for e in report.get("expenses_list", []):
+            cats[e.get("category") or "Diğer"] = round(cats.get(e.get("category") or "Diğer", 0) + float(e.get("amount", 0)), 2)
+        per = {}
+        for r in list(RESTAURANTS):
+            token = current_rid.set(r["id"])
+            try:
+                per[r["name"]] = pick(await build_report("custom", start.isoformat(), end.isoformat()))
+            finally:
+                current_rid.reset(token)
+        data = {"hafta": f"{start.isoformat()} / {end.isoformat()}", "gecen_hafta_toplam": pick(report), "onceki_hafta_toplam": pick(prev), "gider_kategorileri": cats, "restoranlar": per}
+        return await ai.weekly_commentary(data)
+    except Exception:
+        logging.exception("weekly AI commentary failed")
+        return ""
+
 async def send_weekly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
     async def job(day):
         today = datetime.now(TZ).date()
         start, end = today - timedelta(days=today.weekday() + 7), today - timedelta(days=today.weekday() + 1)
         report = await build_report("custom", start.isoformat(), end.isoformat())
-        await asyncio.to_thread(send_weekly_email, report, f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}")
+        commentary = await weekly_ai_commentary(start, end, report)
+        await asyncio.to_thread(send_weekly_email, report, f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}", commentary)
     return await _deliver("weekly", trigger, key, job)
 
 async def send_monthly_summary(trigger: str, key: str | None = None) -> Dict[str, Any]:
@@ -604,11 +625,36 @@ async def staff_view(request: Request):
     return {"products": products, "inventory": inventory, "my_today": my_today}
 
 @api.get("/public/menu")
-async def public_menu():
+async def public_menu(lang: str = "tr"):
     cats = await menu_groups()
     for g in cats:
         g["items"] = [{k: i[k] for k in ("name", "price", "description", "photo_url")} for i in g["items"]]
-    return {"name": "Florya Dürüm Tır", "categories": cats}
+    if lang in ai.LANGS:
+        await translate_menu(cats, lang)
+    return {"name": "Florya Dürüm Tır", "lang": lang if lang in ai.LANGS else "tr", "categories": cats}
+
+_translate_locks: Dict[str, asyncio.Lock] = {}
+
+async def translate_menu(cats: List[Dict[str, Any]], lang: str) -> None:
+    """Swap menu texts for cached AI translations, translating only strings not seen before."""
+    texts = {t for g in cats for t in [g["category"], *[i["name"] for i in g["items"]], *[i["description"] for i in g["items"]]] if t and t.strip()}
+    async with _translate_locks.setdefault(lang, asyncio.Lock()):
+        known = {d["src"]: d["text"] for d in await db.translations.find({"lang": lang, "src": {"$in": list(texts)}}, {"_id": 0}).to_list(None)}
+        missing = sorted(texts - known.keys())
+        for i in range(0, len(missing), 60):
+            try:
+                done = await ai.translate(lang, missing[i:i + 60])
+            except Exception:
+                logging.exception("menu translation failed (%s)", lang)
+                break
+            for src, text in done.items():
+                await db.translations.update_one({"lang": lang, "src": src}, {"$set": {"text": text}}, upsert=True)
+            known.update(done)
+    for g in cats:
+        g["category_original"], g["category"] = g["category"], known.get(g["category"], g["category"])
+        for it in g["items"]:
+            it["name_original"] = it["name"]
+            it["name"], it["description"] = known.get(it["name"], it["name"]), known.get(it["description"], it["description"])
 
 async def menu_groups() -> List[Dict[str, Any]]:
     """Active products grouped by category ('kebap' and 'Kebap ' merge), in the owner's manual order."""
@@ -677,6 +723,18 @@ async def ai_chat(body: ChatIn, request: Request):
     rid = current_rid.get()
     system = ai.ADMIN_PROMPT.format(today=datetime.now(TZ).strftime("%d.%m.%Y %A"), restaurant="Tüm restoranlar" if rid == "all" else RESTAURANT_NAMES.get(rid, ""), data=await ai_context())
     return StreamingResponse(ai.stream_answer(db.raw.ai_messages, body.session_id, member["user_id"], system, body.message, {"restaurant_id": rid}), media_type="text/event-stream", headers=SSE_HEADERS)
+
+@api.get("/ai/weekly-preview")
+async def ai_weekly_preview(request: Request):
+    if ai.rate_limited(f"weekly:{request.state.member['user_id']}", 5, 600):
+        raise HTTPException(status_code=429, detail="Birkaç dakika sonra tekrar deneyin")
+    today = datetime.now(TZ).date()
+    start, end = today - timedelta(days=today.weekday() + 7), today - timedelta(days=today.weekday() + 1)
+    report = await build_report("custom", start.isoformat(), end.isoformat())
+    text = await weekly_ai_commentary(start, end, report)
+    if not text:
+        raise HTTPException(status_code=502, detail="Yorum şu an oluşturulamadı, lütfen tekrar deneyin")
+    return {"week": f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}", "text": text}
 
 @api.get("/ai/history")
 async def ai_history(session_id: str, request: Request):

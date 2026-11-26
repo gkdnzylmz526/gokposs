@@ -3,14 +3,13 @@ import { MessageCircleQuestion } from "lucide-react";
 import { ChatWindow, streamChat, useChatSession } from "@/components/ChatWindow";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const SUGGESTIONS = ["Ne önerirsiniz?", "Acısız seçenekler neler?", "En hesaplı ürün hangisi?"];
 
-export const MenuChat = () => {
+export const MenuChat = ({ t }) => {
   const [open, setOpen] = useState(false);
   const [sid, reset] = useChatSession("menu-chat-session");
   const send = (message, onDelta) => streamChat(`${API}/public/menu-chat`, { session_id: sid, message }, {}, onDelta);
   return <>
-    {open && <ChatWindow variant="menu" title="Menü Asistanı" subtitle="Menümüzle ilgili her şeyi sorabilirsiniz" greeting="Hoş geldiniz! Size menümüzden ne önermemi istersiniz?" suggestions={SUGGESTIONS} send={send} onClose={() => setOpen(false)} onReset={reset} />}
-    {!open && <button className="menu-chat-fab" onClick={() => setOpen(true)} data-testid="menu-chat-button"><MessageCircleQuestion size={18} /> Menüye sor</button>}
+    {open && <ChatWindow variant="menu" title={t.title} subtitle={t.subtitle} greeting={t.greeting} placeholder={t.placeholder} suggestions={t.suggestions} send={send} onClose={() => setOpen(false)} onReset={reset} />}
+    {!open && <button className="menu-chat-fab" onClick={() => setOpen(true)} data-testid="menu-chat-button"><MessageCircleQuestion size={18} /> {t.button}</button>}
   </>;
 };

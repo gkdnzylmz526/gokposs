@@ -54,7 +54,7 @@ def send_report_email(pdf: bytes, report: dict, day: str) -> None:
     )
 
 
-def send_weekly_email(report: dict, label: str) -> None:
+def send_weekly_email(report: dict, label: str, commentary: str = "") -> None:
     top = report["top_products"][:5]
     lines = [f"{i + 1}. {p['product_name']} — {qty(p['quantity'])} adet · ciro {tl(p['revenue'])} · kâr {tl(p['profit'])}" for i, p in enumerate(top)] or ["Bu hafta satış yok."]
     margin = round(report["profit"] / report["revenue"] * 100) if report["revenue"] else 0
@@ -62,7 +62,8 @@ def send_weekly_email(report: dict, label: str) -> None:
         f"GÖKBOSS POS — Haftalık özet {label}",
         f"Merhaba,\n\nGeçen haftanın özeti ({label}):\n\n"
         f"Toplam ciro: {tl(report['revenue'])}\nToplam gider: {tl(report['expenses'])}\nNet kâr: {tl(report['profit'])} (%{margin})\nSatış işlemi: {report['sales_count']}\n\n"
-        "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi haftalar,\nGÖKBOSS POS",
+        + (f"YAPAY ZEKA YORUMU\n{'-' * 17}\n{commentary}\n\n" if commentary else "")
+        + "En çok satanlar:\n" + "\n".join(lines) + "\n\nİyi haftalar,\nGÖKBOSS POS",
     )
 
 

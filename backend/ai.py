@@ -67,3 +67,32 @@ async def stream_answer(coll, session_id: str, owner: str, system: str, message:
     await coll.insert_many([{**base, "id": str(uuid.uuid4()), "role": "user", "content": message, "created_at": now},
                             {**base, "id": str(uuid.uuid4()), "role": "assistant", "content": answer, "created_at": datetime.now(timezone.utc).isoformat()}])
     yield f"data: {json.dumps({'done': True})}\n\n"
+
+
+LANGS = {"en": "English", "ar": "Arabic", "ru": "Russian"}
+
+WEEKLY_PROMPT = """Sen bir restoran işletme danışmanısın. Aşağıdaki geçen hafta verilerine bakarak restoran sahibine Türkçe, samimi ve kısa bir haftalık yorum yaz.
+Biçim (düz metin, markdown kullanma):
+- 2-3 cümlelik genel değerlendirme (ciro, gider, kâr; önceki haftayla kıyas)
+- "Dikkat:" ile başlayan 1-2 madde (artan gider, düşen ciro, zayıf restoran vb.)
+- "Öneri:" ile başlayan 2-3 somut, uygulanabilir madde
+Toplam 150 kelimeyi geçme. Veride olmayan rakam uydurma; veri azsa bunu söyle."""
+
+
+async def _ask(system: str, text: str, session: str) -> str:
+    chat = LlmChat(api_key=os.environ["EMERGENT_LLM_KEY"], session_id=session, system_message=system).with_model(*MODEL)
+    return (await chat.send_message(UserMessage(text=text))).strip()
+
+
+async def weekly_commentary(data: Dict[str, Any]) -> str:
+    return await _ask(WEEKLY_PROMPT, json.dumps(data, ensure_ascii=False, default=str), f"weekly-{uuid.uuid4()}")
+
+
+async def translate(lang: str, texts: List[str]) -> Dict[str, str]:
+    """Translate Turkish menu strings; returns {source: translation} for the ones the model returned."""
+    system = (f"You translate Turkish restaurant menu texts into {LANGS[lang]}. Return ONLY a JSON object mapping each input string exactly to its translation. "
+              "Keep dish names that are well known Turkish dishes recognisable (e.g. 'Adana Kebap' -> 'Adana Kebab'), translate descriptions naturally, keep numbers and units.")
+    raw = await _ask(system, json.dumps(texts, ensure_ascii=False), f"tr-{uuid.uuid4()}")
+    raw = raw[raw.find("{"): raw.rfind("}") + 1]
+    out = json.loads(raw) if raw else {}
+    return {k: str(v) for k, v in out.items() if k in texts and isinstance(v, (str, int, float))}

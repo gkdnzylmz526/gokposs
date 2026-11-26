@@ -4,7 +4,7 @@ import { newSessionId, streamChat } from "@/lib/aiStream";
 
 // Shared chat window used by the admin assistant and the QR menu assistant.
 const EMPTY = [];
-export const ChatWindow = ({ title, subtitle, suggestions, greeting, send, onClose, onReset, initial = EMPTY, variant = "admin" }) => {
+export const ChatWindow = ({ title, subtitle, suggestions, greeting, send, onClose, onReset, initial = EMPTY, variant = "admin", placeholder = "Sorunuzu yazın…" }) => {
   const [messages, setMessages] = useState(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,7 +35,7 @@ export const ChatWindow = ({ title, subtitle, suggestions, greeting, send, onClo
         <div ref={end} />
       </div>
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); ask(); }}>
-        <input value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} placeholder="Sorunuzu yazın…" disabled={busy} data-testid={`${variant}-chat-input`} />
+        <input value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} placeholder={placeholder} disabled={busy} data-testid={`${variant}-chat-input`} />
         <button disabled={busy || !text.trim()} aria-label="Gönder" data-testid={`${variant}-chat-send`}><Send size={16} /></button>
       </form>
     </div>

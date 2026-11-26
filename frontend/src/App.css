@@ -336,3 +336,19 @@
 .chat-window { color: #1d2533; text-align: left; font-family: "Plus Jakarta Sans", sans-serif; }
 .chat-msg.assistant { color: #1d2533; }
 .chat-head { color: #fff; }
+.qr-lang { position: absolute; top: 12px; right: 12px; z-index: 5; display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(15,20,30,.55); backdrop-filter: blur(10px); }
+.qr-menu[dir="rtl"] .qr-lang { right: auto; left: 12px; }
+.qr-menu { position: relative; }
+.qr-lang button { border: 0; background: transparent; color: #e5e7eb; font-size: 11px; font-weight: 700; letter-spacing: .5px; padding: 6px 9px; border-radius: 999px; cursor: pointer; transition: background-color .2s, color .2s; }
+.qr-lang button.active { background: #f6d48b; color: #1d2533; }
+.qr-orig { display: block; font-style: normal; font-size: 11px; opacity: .55; font-weight: 400; }
+.lang-ar .qr-welcome { font-family: "Aref Ruqaa", serif; }
+.lang-ru .qr-welcome { font-family: "Great Vibes", "Playfair Display", cursive; }
+.qr-menu[dir="rtl"] .qr-back-icon { transform: scaleX(-1); }
+.qr-menu[dir="rtl"] .chat-window, .qr-menu[dir="rtl"] .chat-msg { text-align: right; }
+.qr-menu[dir="rtl"] .menu-chat-fab { right: auto; left: 16px; }
+.qr-menu[dir="rtl"] .chat-menu { right: auto; left: 12px; }
+.ai-weekly { margin-bottom: 22px; border: 1px solid #f1e2c2; background: linear-gradient(0deg, #fff, #fffaf0); }
+.ai-weekly h3 { display: flex; align-items: center; gap: 8px; }
+.ai-weekly-text p { white-space: pre-wrap; line-height: 1.6; font-size: 14px; margin: 6px 0 0; }
+.lang-ar .qr-hero-kicker, .lang-ar .qr-hero-menu, .lang-ar .qr-cat-card, .lang-ar .qr-cat h2, .lang-ar footer, .lang-ar .qr-hero-text small, .lang-ar .qr-swipe-hint { letter-spacing: 0 !important; }
