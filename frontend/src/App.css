@@ -273,3 +273,66 @@
 .rest-hero-logo { width: 72px; height: 72px; border-radius: 18px; object-fit: contain; background: #fff; padding: 4px; }
 .brand-logo { width: 40px; height: 40px; border-radius: 12px; object-fit: contain; background: #fff; }
 .wa-button { color: #1a9e55 !important; text-decoration: none; }
+/* QR welcome */
+.qr-welcome { font-family: "Great Vibes", cursive; font-size: clamp(30px, 8vw, 44px); line-height: 1.1; margin: 0 0 6px; color: #f6d48b; text-shadow: 0 2px 14px rgba(0,0,0,.45); animation: qrWelcome 1.1s ease-out both; }
+@keyframes qrWelcome { from { opacity: 0; transform: translateY(10px); letter-spacing: 4px; } to { opacity: 1; transform: none; letter-spacing: 0; } }
+@media (prefers-reduced-motion: reduce) { .qr-welcome { animation: none; } }
+/* Chat */
+.ai-fab, .menu-chat-fab { position: fixed; right: 22px; bottom: 22px; z-index: 60; display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 13px 20px; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,.22); transition: transform .2s, box-shadow .2s; }
+.ai-fab { background: #1d2533; color: #f6d48b; }
+.menu-chat-fab { background: #c0392b; color: #fff; right: 16px; bottom: 16px; }
+.ai-fab:hover, .menu-chat-fab:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(0,0,0,.28); }
+.chat-window { position: fixed; right: 22px; bottom: 22px; z-index: 70; width: min(400px, calc(100vw - 24px)); height: min(600px, calc(100vh - 44px)); display: flex; flex-direction: column; background: #fff; border-radius: 22px; box-shadow: 0 24px 60px rgba(15,20,30,.3); overflow: hidden; animation: chatIn .25s ease-out; }
+.chat-menu { right: 12px; bottom: 12px; height: min(560px, calc(100vh - 24px)); }
+@keyframes chatIn { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: #1d2533; color: #fff; }
+.chat-menu .chat-head { background: #7a1f16; }
+.chat-head > div:nth-child(2) { flex: 1; min-width: 0; }
+.chat-head b { display: block; font-size: 14px; }
+.chat-head small { display: block; font-size: 11px; opacity: .7; }
+.chat-avatar { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: rgba(246,212,139,.18); color: #f6d48b; }
+.chat-icon { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; opacity: .8; }
+.chat-icon:hover { opacity: 1; background: rgba(127,127,127,.15); }
+.chat-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #faf8f4; }
+.chat-empty p { margin: 4px 0 12px; color: #4b5563; font-size: 14px; }
+.chat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-chips button { border: 1px solid #e3ded6; background: #fff; border-radius: 999px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: border-color .2s, background-color .2s; }
+.chat-chips button:hover { border-color: #e0a23a; background: #fffaf0; }
+.chat-msg { max-width: 85%; padding: 10px 13px; border-radius: 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; animation: chatIn .2s ease-out; }
+.chat-msg.user { align-self: flex-end; background: #1d2533; color: #fff; border-bottom-right-radius: 4px; }
+.chat-menu .chat-msg.user { background: #7a1f16; }
+.chat-msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #eee7dc; border-bottom-left-radius: 4px; }
+.chat-msg.error { color: #b54a3a; }
+.chat-typing { display: inline-flex; gap: 4px; }
+.chat-typing i { width: 6px; height: 6px; border-radius: 50%; background: #c9bfae; animation: typing 1s infinite; }
+.chat-typing i:nth-child(2) { animation-delay: .15s; } .chat-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes typing { 0%, 100% { opacity: .3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+.chat-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #f0ece6; background: #fff; }
+.chat-input input { flex: 1; min-width: 0; height: 42px; border: 1px solid #e3ded6; border-radius: 12px; padding: 0 12px; font-size: 14px; }
+.chat-input input:focus { outline: none; border-color: #e0a23a; }
+.chat-input button { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #e0a23a; color: #fff; display: grid; place-items: center; cursor: pointer; }
+.chat-input button:disabled { opacity: .45; cursor: default; }
+/* Menu order */
+.product-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.product-tools .wizard-banner { margin-bottom: 0; }
+.order-banner { background: #fff !important; color: #1d2533 !important; border: 1px solid #e3ded6 !important; }
+.sort-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(15,20,30,.45); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 16px; }
+.sort-modal { width: min(620px, 100%); max-height: 88vh; display: flex; flex-direction: column; gap: 12px; animation: chatIn .2s ease-out; }
+.sort-list { overflow-y: auto; display: grid; gap: 8px; padding-right: 4px; }
+.sort-row { border: 1px solid #eee7dc; border-radius: 12px; background: #fff; transition: border-color .15s, background-color .15s; }
+.sort-row.drag-over { border-color: #e0a23a; background: #fffaf0; }
+.sort-line { display: flex; align-items: center; gap: 8px; padding: 9px 10px; }
+.sort-grip { color: #b5ab9b; cursor: grab; flex-shrink: 0; }
+.sort-label { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+.sort-line > button { width: 32px; height: 32px; border: 1px solid #eee7dc; border-radius: 9px; background: #faf8f4; display: grid; place-items: center; cursor: pointer; }
+.sort-line > button:disabled { opacity: .35; cursor: default; }
+.sort-cat { border: 0; background: none; font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 0; }
+.sort-cat small { color: #8a8378; font-weight: 500; }
+.sort-cat .rot { transform: rotate(180deg); }
+.sort-cat svg { transition: transform .2s; }
+.sort-children { display: grid; gap: 6px; padding: 0 10px 10px 34px; }
+.sort-children .sort-label { font-weight: 500; }
+.qr-hero-text .qr-welcome { text-transform: none; letter-spacing: 0; font-weight: 400; margin-bottom: 14px; display: block; }
+.chat-window { color: #1d2533; text-align: left; font-family: "Plus Jakarta Sans", sans-serif; }
+.chat-msg.assistant { color: #1d2533; }
+.chat-head { color: #fff; }

@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from exports import build_excel, build_pdf, build_payroll_excel, build_payslip_pdf
 from mailer import send_cash_reminder_email, send_leave_request_email, send_missing_revenue_email, send_monthly_email, send_pin_request_email, send_report_email, send_restaurant_daily_email, send_weekly_email
@@ -30,6 +30,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
 from storage import APP_PREFIX, get_object, init_storage, put_object
+import ai
 import restaurants as rest
 from scope import DEFAULT_RESTAURANT, RESTAURANT_IDS, RESTAURANT_NAMES, RESTAURANTS, SCOPED, ScopedDB, current_rid, specific_rid
 db = ScopedDB(client[os.environ["DB_NAME"]])
@@ -604,19 +605,92 @@ async def staff_view(request: Request):
 
 @api.get("/public/menu")
 async def public_menu():
-    """Products grouped by category; 'kebap' and 'Kebap ' land in the same group."""
+    cats = await menu_groups()
+    for g in cats:
+        g["items"] = [{k: i[k] for k in ("name", "price", "description", "photo_url")} for i in g["items"]]
+    return {"name": "Florya Dürüm Tır", "categories": cats}
+
+async def menu_groups() -> List[Dict[str, Any]]:
+    """Active products grouped by category ('kebap' and 'Kebap ' merge), in the owner's manual order."""
+    order = (await db.settings.find_one({"id": "menu_order"}, {"_id": 0}) or {}).get("categories", [])
+    rank = {_tr_key(c): i for i, c in enumerate(order)}
     groups: Dict[str, Dict[str, Any]] = {}
-    for p in sorted(await list_items("products", limit=None), key=lambda x: _tr_key(x["name"])):
+    for p in sorted(await list_items("products", limit=None), key=lambda x: (x.get("sort_order", 10**6), _tr_key(x["name"]))):
         if p.get("active", True):
             raw = (p.get("category") or "").strip() or "Menü"
             group = groups.setdefault(_tr_key(raw), {"category": ("İ" if raw[0] == "i" else raw[0].upper()) + raw[1:], "items": []})
             photo = (p.get("photo") or {}).get("id")
-            group["items"].append({"name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""), "photo_url": f"/api/public/photos/{photo}" if photo else ""})
-    cats = sorted(groups.values(), key=lambda g: _tr_key(g["category"]))
+            group["items"].append({"id": p["id"], "name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""), "photo_url": f"/api/public/photos/{photo}" if photo else ""})
+    cats = sorted(groups.values(), key=lambda g: (rank.get(_tr_key(g["category"]), 10**6), _tr_key(g["category"])))
     for g in cats:
         g["cover"] = next((i["photo_url"] for i in g["items"] if i["photo_url"]), "")
         g["count"] = len(g["items"])
-    return {"name": "Florya Dürüm Tır", "categories": cats}
+    return cats
+
+class MenuOrderIn(BaseModel):
+    categories: List[str] = Field(max_length=200)
+    products: List[str] = Field(max_length=2000)
+
+@api.get("/menu-order")
+async def get_menu_order():
+    return [{"category": g["category"], "items": [{"id": i["id"], "name": i["name"], "photo_url": i["photo_url"]} for i in g["items"]]} for g in await menu_groups()]
+
+@api.put("/menu-order")
+async def save_menu_order(body: MenuOrderIn, request: Request):
+    await db.settings.update_one({"id": "menu_order"}, {"$set": {"id": "menu_order", "categories": [c.strip() for c in body.categories]}}, upsert=True)
+    for i, pid in enumerate(body.products):
+        await db.products.update_one({"id": pid}, {"$set": {"sort_order": i}})
+    await audit(request, "Menü sırasını değiştirdi", "products", None, detail=f"{len(body.categories)} kategori")
+    return {"ok": True}
+
+class ChatIn(BaseModel):
+    session_id: str = Field(min_length=8, max_length=64)
+    message: str = Field(min_length=1, max_length=1000)
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+async def ai_context() -> str:
+    data: Dict[str, Any] = {}
+    for period, label in (("daily", "bugün"), ("weekly", "bu hafta"), ("monthly", "bu ay")):
+        r = await build_report(period)
+        data[label] = {k: r.get(k) for k in ("revenue", "expenses", "profit", "sales_count", "payments", "waste_cost", "start", "end")}
+    month_start = _range("monthly", None, None)[0].astimezone(timezone.utc).isoformat()
+    by_cat: Dict[str, float] = {}
+    for e in await list_items("expenses", month_start, None):
+        by_cat[e.get("category") or "Diğer"] = round(by_cat.get(e.get("category") or "Diğer", 0) + float(e.get("amount", 0)), 2)
+    data["bu_ay_gider_kategorileri"] = by_cat
+    data["son_gelirler"] = [{k: i.get(k) for k in ("date", "amount", "payment", "category")} for i in (await list_items("incomes", None, 40))]
+    inv = await list_items("inventory", limit=None)
+    data["stok"] = [{k: i.get(k) for k in ("name", "quantity", "unit", "minimum", "unit_cost")} for i in inv[:150]]
+    data["kritik_stok"] = [i["name"] for i in inv if float(i.get("quantity", 0)) <= float(i.get("minimum", 0))]
+    costs = await product_costs()
+    data["urun_maliyetleri"] = [{k: p.get(k) for k in ("name", "category", "price", "cost", "margin", "food_cost_pct", "suggested_price", "suggested_with_overhead")} for p in costs["products"][:150]]
+    data["sabit_giderler"] = costs.get("overhead")
+    data["personel_sayisi"] = len(await list_items("staff", limit=None))
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+@api.post("/ai/chat")
+async def ai_chat(body: ChatIn, request: Request):
+    member = request.state.member
+    if ai.rate_limited(f"admin:{member['user_id']}", 40, 600):
+        raise HTTPException(status_code=429, detail="Çok fazla soru sordunuz, birkaç dakika sonra tekrar deneyin")
+    rid = current_rid.get()
+    system = ai.ADMIN_PROMPT.format(today=datetime.now(TZ).strftime("%d.%m.%Y %A"), restaurant="Tüm restoranlar" if rid == "all" else RESTAURANT_NAMES.get(rid, ""), data=await ai_context())
+    return StreamingResponse(ai.stream_answer(db.raw.ai_messages, body.session_id, member["user_id"], system, body.message, {"restaurant_id": rid}), media_type="text/event-stream", headers=SSE_HEADERS)
+
+@api.get("/ai/history")
+async def ai_history(session_id: str, request: Request):
+    return await ai.history(db.raw.ai_messages, session_id, request.state.member["user_id"])
+
+@api.post("/public/menu-chat")
+async def menu_chat(body: ChatIn, request: Request):
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[0].strip()
+    if ai.rate_limited(f"ip:{ip}", 15, 600) or ai.rate_limited("menu:all", 400, 3600):
+        raise HTTPException(status_code=429, detail="Çok fazla mesaj gönderildi, lütfen biraz sonra tekrar deneyin")
+    menu = await public_menu()
+    data = json.dumps([{"kategori": c["category"], "urunler": [{"ad": i["name"], "fiyat": i["price"], "aciklama": i["description"]} for i in c["items"]]} for c in menu["categories"]], ensure_ascii=False)
+    system = ai.MENU_PROMPT.format(name=menu["name"], data=data)
+    return StreamingResponse(ai.stream_answer(db.raw.menu_chat, body.session_id, "public", system, body.message[:500]), media_type="text/event-stream", headers=SSE_HEADERS)
 
 async def send_cash_reminder(trigger: str, key: str | None = None) -> Dict[str, Any] | None:
     last = None
