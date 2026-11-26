@@ -12,7 +12,7 @@ from contextlib import suppress
 from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -282,6 +282,7 @@ class ProductEntry(Entry):
     target_margin: float = 0
     description: str = Field(default="", max_length=200)
     photo: Dict[str, Any] = {}
+    tags: List[Literal["spicy", "vegetarian", "vegan", "nuts", "gluten_free", "dairy"]] = []
 
 class IncomeEntry(Entry):
     date: str = Field(pattern=DATE_PATTERN)
@@ -628,7 +629,7 @@ async def staff_view(request: Request):
 async def public_menu(lang: str = "tr"):
     cats = await menu_groups()
     for g in cats:
-        g["items"] = [{k: i[k] for k in ("name", "price", "description", "photo_url")} for i in g["items"]]
+        g["items"] = [{k: i[k] for k in ("name", "price", "description", "tags", "photo_url")} for i in g["items"]]
     if lang in ai.LANGS:
         await translate_menu(cats, lang)
     return {"name": "Florya Dürüm Tır", "lang": lang if lang in ai.LANGS else "tr", "categories": cats}
@@ -666,7 +667,7 @@ async def menu_groups() -> List[Dict[str, Any]]:
             raw = (p.get("category") or "").strip() or "Menü"
             group = groups.setdefault(_tr_key(raw), {"category": ("İ" if raw[0] == "i" else raw[0].upper()) + raw[1:], "items": []})
             photo = (p.get("photo") or {}).get("id")
-            group["items"].append({"id": p["id"], "name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""), "photo_url": f"/api/public/photos/{photo}" if photo else ""})
+            group["items"].append({"id": p["id"], "name": p["name"], "price": p.get("price", 0), "description": p.get("description", ""), "tags": p.get("tags", []), "photo_url": f"/api/public/photos/{photo}" if photo else ""})
     cats = sorted(groups.values(), key=lambda g: (rank.get(_tr_key(g["category"]), 10**6), _tr_key(g["category"])))
     for g in cats:
         g["cover"] = next((i["photo_url"] for i in g["items"] if i["photo_url"]), "")
@@ -746,7 +747,7 @@ async def menu_chat(body: ChatIn, request: Request):
     if ai.rate_limited(f"ip:{ip}", 15, 600) or ai.rate_limited("menu:all", 400, 3600):
         raise HTTPException(status_code=429, detail="Çok fazla mesaj gönderildi, lütfen biraz sonra tekrar deneyin")
     menu = await public_menu()
-    data = json.dumps([{"kategori": c["category"], "urunler": [{"ad": i["name"], "fiyat": i["price"], "aciklama": i["description"]} for i in c["items"]]} for c in menu["categories"]], ensure_ascii=False)
+    data = json.dumps([{"kategori": c["category"], "urunler": [{"ad": i["name"], "fiyat": i["price"], "aciklama": i["description"], "etiketler": i["tags"]} for i in c["items"]]} for c in menu["categories"]], ensure_ascii=False)
     system = ai.MENU_PROMPT.format(name=menu["name"], data=data)
     return StreamingResponse(ai.stream_answer(db.raw.menu_chat, body.session_id, "public", system, body.message[:500]), media_type="text/event-stream", headers=SSE_HEADERS)
 

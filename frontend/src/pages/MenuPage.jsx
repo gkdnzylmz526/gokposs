@@ -3,6 +3,7 @@ import axios from "axios";
 import { ArrowLeft, UtensilsCrossed } from "lucide-react";
 import { MenuChat } from "@/components/MenuChat";
 import { MENU_LANGS, MENU_TEXT, initialMenuLang } from "@/lib/menuI18n";
+import { TagIcons } from "@/lib/menuTags";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
 const HERO = "https://customer-assets-39nsmqrw.emergentagent.net/job_restoran-asistan--8vayy60i/artifacts/517d09d772f8ef18_WhatsApp%20Image%202026-11-25%20at%2017.37.25.jpeg";
@@ -25,16 +26,18 @@ function CategoryGrid({ categories, onPick, t }) {
   );
 }
 
-function CategoryItems({ category, index, onZoom, dir }) {
+function CategoryItems({ category, index, onZoom, dir, lang }) {
+  const used = [...new Set(category.items.flatMap((it) => it.tags || []))];
   return (
     <section className={`qr-cat qr-slide-${dir}`} data-testid={`menu-category-items-${index}`}>
       <h2>{category.category}</h2>
       {category.items.map((it, j) => (
         <div className={`qr-item ${it.photo_url ? "with-photo" : ""}`} key={it.name} data-testid={`menu-item-${index}-${j}`} style={{ animationDelay: `${120 + j * 45}ms` }}>
           {it.photo_url && <button className="qr-thumb" data-testid={`menu-photo-${index}-${j}`} onClick={() => onZoom(it)}><img src={`${BASE}${it.photo_url}`} alt={it.name} loading="lazy" /></button>}
-          <div className="qr-text"><div className="qr-line"><span>{it.name}{it.name_original && it.name_original.toLocaleLowerCase("tr-TR") !== it.name.toLocaleLowerCase("tr-TR") && <em className="qr-orig">{it.name_original}</em>}</span><i /><b>{money(it.price)}</b></div>{it.description && <small>{it.description}</small>}</div>
+          <div className="qr-text"><div className="qr-line"><span>{it.name}{it.name_original && it.name_original.toLocaleLowerCase("tr-TR") !== it.name.toLocaleLowerCase("tr-TR") && <em className="qr-orig">{it.name_original}</em>}</span><i /><b>{money(it.price)}</b></div>{it.description && <small>{it.description}</small>}<TagIcons tags={it.tags} lang={lang} /></div>
         </div>
       ))}
+      {used.length > 0 && <div className="qr-tag-legend" data-testid={`menu-tag-legend-${index}`}><TagIcons tags={used} lang={lang} withLabel /></div>}
     </section>
   );
 }
@@ -91,7 +94,7 @@ export default function MenuPage() {
             <button className="qr-back" data-testid="menu-back" onClick={back}><ArrowLeft size={15} className="qr-back-icon" /> {t.back}</button>
             {cats.map((c, i) => <button key={c.category} className={active === i ? "active" : ""} data-testid={`menu-tab-${i}`} onClick={() => pick(i)}>{c.category}</button>)}
           </nav>
-          <div className="qr-swipe" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} data-testid="menu-swipe-area"><CategoryItems key={active} category={cats[active]} index={active} onZoom={setZoom} dir={dir} /></div>
+          <div className="qr-swipe" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} data-testid="menu-swipe-area"><CategoryItems key={active} lang={lang} category={cats[active]} index={active} onZoom={setZoom} dir={dir} /></div>
           {cats.length > 1 && <p className="qr-swipe-hint">{t.swipe}</p>}
         </>
       )}

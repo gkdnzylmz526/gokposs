@@ -200,3 +200,5 @@
 - QR entry screen: "Restoranımıza hoş geldiniz" in Great Vibes script. Tested iteration_26 (13/13 backend, frontend 100%); follow-up fixes: XFF right-most IP, menu-order/ai chat allowed in all-mode, AI session per restaurant, menu chat reset button.
 - QR menu language switch TR/EN/AR/RU (lib/menuI18n.js UI strings; GET /api/public/menu?lang= -> AI translations cached in `translations` collection, only new strings translated; Arabic RTL; original Turkish name shown under translation; choice remembered).
 - Weekly AI commentary (ai.weekly_commentary, GPT 6 Luna) appended to Monday 09:00 weekly-summary email (no new cron); Raporlar page "Haftalık yapay zeka yorumu" card -> GET /api/ai/weekly-preview. Self-tested (curl + screenshots).
+- Sidebar brand renamed to "GÖKPOS" (visual edit; auth page still "GÖKBOSS POS").
+- Menu tags (product.tags: spicy, vegetarian, vegan, nuts, gluten_free, dairy) — chip picker in product edit modal (lib/menuTags.jsx), icons under each QR menu item + translated legend per category; tags passed to menu AI. Self-tested.

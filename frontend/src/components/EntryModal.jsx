@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, Save, Trash2, X } from "lucide-react";
 import { DatePicker } from "@/components/DatePicker";
+import { TagPicker } from "@/lib/menuTags";
 
 function RecipeEditor({ value, inventory, onChange }) {
   const rows = value || [];
@@ -52,6 +53,7 @@ function PurchaseEditor({ value, inventory, onChange }) {
 function Field({ field, value, onChange, inventory, autoFocus }) {
   if (field.type === "recipe") return <RecipeEditor value={value} inventory={inventory} onChange={onChange} />;
   if (field.type === "date") return <DatePicker label={field.label} value={value} onChange={onChange} testId={`${field.key}-date-picker`} />;
+  if (field.type === "tags") return <TagPicker value={value} onChange={onChange} />;
   if (field.type === "purchases") return <PurchaseEditor value={value} inventory={inventory} onChange={onChange} />;
   return (
     <label data-testid={`${field.key}-field`}>{field.label}

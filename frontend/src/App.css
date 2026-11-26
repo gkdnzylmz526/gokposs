@@ -352,3 +352,11 @@
 .ai-weekly h3 { display: flex; align-items: center; gap: 8px; }
 .ai-weekly-text p { white-space: pre-wrap; line-height: 1.6; font-size: 14px; margin: 6px 0 0; }
 .lang-ar .qr-hero-kicker, .lang-ar .qr-hero-menu, .lang-ar .qr-cat-card, .lang-ar .qr-cat h2, .lang-ar footer, .lang-ar .qr-hero-text small, .lang-ar .qr-swipe-hint { letter-spacing: 0 !important; }
+.menu-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.menu-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; min-width: 22px; justify-content: center; padding: 0 6px; border-radius: 999px; color: var(--tag); background: color-mix(in srgb, var(--tag) 16%, transparent); border: 1px solid color-mix(in srgb, var(--tag) 35%, transparent); font-size: 11px; font-weight: 600; }
+.qr-tag-legend { margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,.12); }
+.qr-tag-legend .menu-tags { gap: 8px; }
+.tag-picker { display: grid; gap: 8px; }
+.tag-picker > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #e3ded6; background: #fff; color: #4b5563; border-radius: 999px; padding: 7px 12px; font-size: 13px; cursor: pointer; transition: background-color .15s, border-color .15s, color .15s; }
+.tag-chip.on { color: var(--tag); border-color: var(--tag); background: color-mix(in srgb, var(--tag) 10%, #fff); font-weight: 600; }
