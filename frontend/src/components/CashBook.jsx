@@ -79,7 +79,7 @@ function InvoiceFiles({ invoice, onChange }) {
   );
 }
 
-function InvoiceList({ items, onAdd, onEdit, onDelete, onReload }) {
+export function InvoiceList({ items, onAdd, onEdit, onDelete, onReload }) {
   const [filter, setFilter] = useState("Ödenmedi");
   const [paying, setPaying] = useState(null);
   const unpaid = items.filter((i) => i.status === "Ödenmedi");
@@ -121,14 +121,13 @@ export const CashBook = ({ data, onAdd: add, onEdit, onDelete, onReload }) => {
   const [tab, setTab] = useState("incomes");
   const all = data.restaurant_id === "all";
   const onAdd = (...args) => (all ? toast.error("Kayıt eklemek için üstten bir restoran seçin") : add(...args));
-  const tabs = [["incomes", "Gelirler", data.incomes.length], ["expenses", "Giderler", data.expenses_list.length], ["invoices", "Faturalar", data.invoices.filter((i) => i.status === "Ödenmedi").length]];
+  const tabs = [["incomes", "Gelirler", data.incomes.length], ["expenses", "Giderler", data.expenses_list.length]];
   return (
     <section className="panel table-panel cash-book" data-testid="cash-book">
-      <div className="panel-head book-title"><div><h3>Manuel kayıtlar</h3><span className="muted">POS'unuzdaki ciroyu, giderleri ve faturaları buraya girin; kasa hesabı ve raporlar otomatik güncellenir</span></div></div>
+      <div className="panel-head book-title"><div><h3>Manuel kayıtlar</h3><span className="muted">POS'unuzdaki ciroyu ve giderleri buraya girin (faturalar artık ayrı Faturalar bölümünde); kasa hesabı ve raporlar otomatik güncellenir</span></div></div>
       <div className="book-tabs">{tabs.map(([k, l, n]) => <button key={k} className={tab === k ? "active" : ""} data-testid={`cash-book-tab-${k}`} onClick={() => setTab(k)}>{l}{n > 0 && <span>{n}</span>}</button>)}</div>
       {tab === "incomes" && <IncomeList items={data.incomes} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />}
       {tab === "expenses" && <ExpenseList items={data.expenses_list} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} />}
-      {tab === "invoices" && <InvoiceList items={data.invoices} onAdd={onAdd} onEdit={onEdit} onDelete={onDelete} onReload={onReload} />}
     </section>
   );
 };

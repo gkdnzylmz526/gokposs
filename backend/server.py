@@ -2109,6 +2109,35 @@ async def _invoice(invoice_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Fatura bulunamadı")
     return inv
 
+def _name_key(text: str) -> str:
+    return " ".join(_tr_key(text or "").split())
+
+@api.get("/invoices/groups")
+async def invoice_groups(by: Literal["supplier", "category"] = "supplier", month: str = Query(default="all", pattern=r"^(all|\d{4}-\d{2})$"), q: str = Query(default="", max_length=80)):
+    """Invoices summed per company or subject; same names match regardless of case, spaces and Turkish letters."""
+    query = {} if month == "all" else {"date": {"$regex": f"^{month}"}}
+    rows = await db.invoices.find(query, {"_id": 0, "files": 0}).sort("date", -1).to_list(5000)
+    groups: Dict[str, Dict[str, Any]] = {}
+    for inv in rows:
+        label = " ".join((inv.get(by) or ("Diğer" if by == "category" else "")).split()) or "—"
+        g = groups.setdefault(_name_key(label), {"key": _name_key(label), "variants": {}, "count": 0, "total": 0.0, "paid": 0.0, "unpaid": 0.0, "vat": 0.0, "last_date": "", "invoices": []})
+        amount = float(inv.get("amount", 0))
+        g["variants"][label] = g["variants"].get(label, 0) + 1
+        g["count"] += 1
+        g["total"] += amount
+        g["paid" if inv.get("status") == "Ödendi" else "unpaid"] += amount
+        g["vat"] += amount - amount / (1 + float(inv.get("vat_rate", 0)) / 100)
+        g["last_date"] = max(g["last_date"], inv.get("date", ""))
+        g["invoices"].append({k: inv.get(k) for k in ("id", "supplier", "category", "invoice_no", "date", "due_date", "amount", "status")})
+    needle = _name_key(q)
+    items = sorted((g for g in groups.values() if needle in g["key"]), key=lambda g: -g["total"])
+    for g in items:
+        g.update({k: round(g[k], 2) for k in ("total", "paid", "unpaid", "vat")})
+        g["invoices"] = g["invoices"][:200]
+        variants = g.pop("variants")
+        g["name"] = max(variants, key=lambda v: (variants[v], v != v.lower()))
+    return {"by": by, "month": month, "groups": items, "total": round(sum(g["total"] for g in items), 2), "unpaid": round(sum(g["unpaid"] for g in items), 2), "count": sum(g["count"] for g in items)}
+
 @api.post("/invoices/{invoice_id}/pay")
 async def pay_invoice(invoice_id: str, body: InvoicePayIn, request: Request):
     await _invoice(invoice_id)

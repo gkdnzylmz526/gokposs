@@ -59,7 +59,8 @@ function Field({ field, value, onChange, inventory, autoFocus }) {
     <label data-testid={`${field.key}-field`}>{field.label}
       {field.type === "select"
         ? <select value={value || ""} onChange={(e) => onChange(e.target.value)} data-testid={`${field.key}-select`}>{!field.required && <option value="">Seçin</option>}{[...field.options, ...(value && !field.options.includes(value) ? [value] : [])].map((o) => <option key={o} value={o}>{o}</option>)}</select>
-        : <input autoFocus={autoFocus} type={field.type || "text"} step="any" placeholder={field.placeholder} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />}
+        : <input autoFocus={autoFocus} type={field.type || "text"} step="any" placeholder={field.placeholder} value={value ?? ""} onChange={(e) => onChange(e.target.value)} list={field.suggestions ? `${field.key}-suggestions` : undefined} data-testid={`${field.key}-input`} />}
+      {field.suggestions && <datalist id={`${field.key}-suggestions`}>{field.suggestions.map((o) => <option key={o} value={o} />)}</datalist>}
     </label>
   );
 }
